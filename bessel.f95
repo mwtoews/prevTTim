@@ -1,3 +1,7 @@
+!Copyright (C), 2010, Mark Bakker.
+!Module for the computation of bessel functions and bessel line elements
+!bessel.f95 is part of the TTim program and is distributed under the MIT license
+
 module bessel
 
     real(kind=8) :: pi

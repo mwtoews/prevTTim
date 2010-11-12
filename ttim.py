@@ -1,3 +1,8 @@
+'''
+Copyright (C), 2010, Mark Bakker.
+TTim is distributed under the MIT license
+'''
+
 import numpy as np
 import matplotlib.pyplot as plt
 from bessel import *
