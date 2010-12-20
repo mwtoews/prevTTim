@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from bessel import *
 from invlap import *
+from scipy.special import kv # Needed for K1 in Well class
 
 def ModelMaq(kaq=[1],z=[1,0],c=[],Saq=[],Sll=[],topboundary='imp',phreatictop=False,tmin=1,tmax=10,M=20):
     kaq = np.atleast_1d(kaq).astype('d')
@@ -90,16 +91,19 @@ class TimModel:
         self.Np = len(self.p)
         self.Npin = 2 * self.M + 1
         self.aq.initialize()
-    def potential(self,x,y,t,aq=None):
+    def potential(self,x,y,t,aq=None,derivative=0):
         '''returns array of potentials of len(t)
         t must be ordered and tmin <= t <= tmax'''
 	if aq is None: aq = self.aq.findAquiferData(x,y)
         t = np.atleast_1d(t)
+        if (t[0] < self.tmin) or (t[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
         pot = np.zeros((aq.Naq,self.Np),'D')
         for e in self.elementList:
             pot += e.potential(x,y,aq)
         #pot = np.sum( [ e.potential(x,y,aq) for e in self.elementList ], 0 )  # slower for 30 elements
         pot = np.sum( pot * aq.eigvec, 1 )
+        if derivative > 0:
+            pot *= self.p**derivative
         rv = np.zeros((aq.Naq,len(t)))
         it = 0
         for n in range(self.Nin):
@@ -114,9 +118,9 @@ class TimModel:
                         rv[i,it:it+Nt] = invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
                 it = it + Nt
         return rv
-    def head(self,x,y,t,aq=None):
+    def head(self,x,y,t,aq=None,derivative=0):
         if aq is None: aq = self.aq.findAquiferData(x,y)
-        pot = self.potential(x,y,t,aq)
+        pot = self.potential(x,y,t,aq,derivative)
         for i in range(aq.Naq):
             pot[i] = aq.potentialToHead(pot[i],i)
         return pot
@@ -424,6 +428,29 @@ class MscreenEquation:
 		rhs[:-1,:] -= head[:-1,:] - head[1:,:]
 	return mat, rhs
     
+class InternalStorageEquation:
+    def equation(self):
+	'''Mix-in class that returns matrix rows for multi-aquifer element with
+        total given discharge, uniform but unknown head and InternalStorageEquation
+	Returns matrix part (Nunknowns,Neq,Np), complex'''
+	mat = np.zeros( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' ) # Important to set to zero for some of the equations
+	rhs = np.zeros( (self.Nunknowns, self.model.Np), 'D' )
+        rhs[-1,:] = self.Qtot
+	ieq = 0
+	for e in self.model.elementList:
+	    if e.Nunknowns > 0:
+                head = e.potinflayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis,np.newaxis]
+		mat[:-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:,:] - head[1:,:,:]
+                mat[-1,ieq:ieq+e.Nunknowns,:] -= np.pi * self.rw**2 * self.model.p**2 * head[0,:,:]
+                if e == self:
+                    mat[-1,ieq:ieq+e.Nunknowns,:] += 1.0
+		ieq += e.Nunknowns
+	    else:
+                head = e.potentiallayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis]
+		rhs[:-1,:] -= head[:-1,:] - head[1:,:]
+                rhs[-1,:] += np.pi * self.rw**2 * self.model.p**2 * head[0,:]
+	return mat, rhs
+    
 class HconnEquation:
     def equation(self):
 	'''Mix-in class that returns matrix rows for multi-aquifer element with
@@ -467,6 +494,7 @@ class Well(Element):
             c.shape = (self.aq.Naq,self.model.Nin,self.model.Npin)
             self.coef[i] = c
         self.coef2 = self.coef.reshape(self.Nparam,self.aq.Naq,self.model.Np) # has shape Nparam,Naq,Np
+        self.laboverrwk1 = self.aq.lab2 / (self.rw * kv(1,self.rw/self.aq.lab2))
     def potinf(self,x,y,aq=None):
 	'''Can be called with only one x,y value'''
         if aq is None: aq = self.model.aq.findAquiferData( x, y )
@@ -483,7 +511,8 @@ class Well(Element):
                         l = j*self.model.Npin
                         #for k in range(self.Nparam):
                         #    rv[k,i,j,:] = -1.0 / (2*np.pi*self.model.p[l:l+self.model.Npin]) * self.coef[k,i,j,:] * pot
-                        rv[:,i,j,:] = -1.0 / (2*np.pi*self.model.p[l:l+self.model.Npin]) * self.coef[:,i,j,:] * pot
+                        #rv[:,i,j,:] = -1.0 / (2*np.pi*self.model.p[l:l+self.model.Npin]) * self.coef[:,i,j,:] * pot
+                        rv[:,i,j,:] = -1.0 / (2*np.pi*self.model.p[l:l+self.model.Npin]) * self.laboverrwk1[i,j,:] * self.coef[:,i,j,:] * pot
         rv.shape = (self.Nparam,aq.Naq,self.model.Np)
         return rv
     def dischargeinf(self):
@@ -493,6 +522,51 @@ class Well(Element):
         return rv
     def layout(self):
         return 'point',self.xw,self.yw
+    
+class OneD(Element):
+    def __init__(self,model,Qx=0,layer=1,rightside='inf',L=np.inf):
+	self.Qx = np.atleast_1d(Qx).astype('d')
+        self.layer = np.atleast_1d(layer); self.pylayer = self.layer - 1
+        if (len(self.Qx) == 1) and (len(self.layer) > 1): self.Qx = self.Qx * np.ones(len(self.layer))
+        self.rightside = rightside; self.L = L
+        Element.__init__(self,model,len(self.layer),0)
+	self.name = 'OneD'
+        self.model.addElement(self)
+    def __repr__(self):
+	return self.name
+    def initialize(self):
+	self.aq = self.model.aq.findAquiferData(0,0)
+        self.coef = np.empty( (self.Nparam,self.aq.Naq,self.model.Nin,self.model.Npin), 'D' )
+        for i in range(self.Nparam):
+            self.parameters[i,:] = self.Qx[i] 
+            c = self.aq.coef[:,self.pylayer[i],:]
+            c.shape = (self.aq.Naq,self.model.Nin,self.model.Npin)
+            self.coef[i] = c
+        self.coef2 = self.coef.reshape(self.Nparam,self.aq.Naq,self.model.Np) # has shape Nparam,Naq,Np
+        self.A = self.aq.lab2 / ( 1.0 - np.exp(-2.0*self.L/self.aq.lab2) )
+        self.B = np.exp(-self.L/self.aq.lab2) * self.A
+    def potinf(self,x,y,aq=None):
+	'''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rv = np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D')
+        if aq == self.aq:
+            pot = np.zeros(self.model.Npin,'D')
+            for i in range(self.aq.Naq):
+                for j in range(self.model.Nin):
+                    if x / abs(self.aq.lab2[i,j,0]) < 20.0:
+                        l = j*self.model.Npin
+                        if self.rightside == 'inf':
+                            rv[:,i,j,:] = self.aq.lab2[i,j,:] / self.model.p[l:l+self.model.Npin] * self.coef[:,i,j,:] * np.exp( -x / self.aq.lab2[i,j,:] )
+                        elif self.rightside == 'imp':
+                            rv[:,i,j,:] = self.model.p[l:l+self.model.Npin] * self.coef[:,i,j,:] * \
+                                          ( self.A[i,j,:] * np.exp(-x/self.aq.lab2[i,j,:]) + self.B[i,j,:] * np.exp( (x-self.L)/self.aq.lab2[i,j,:] ) )
+        rv.shape = (self.Nparam,aq.Naq,self.model.Np)
+        return rv
+    def dischargeinf(self):
+        rv = np.zeros((self.Nparam,self.aq.Naq,self.model.Np),'D')
+        for i in range(self.aq.Naq):
+            rv[:,i,:] = 1.0 / self.model.p * self.coef2[:,i,:]
+        return rv
     
 class LineSink(Element):
     def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,S=0,layer=1,addtomodel=True):
@@ -625,6 +699,24 @@ class MscreenWell(Well,MscreenEquation):
 	if full_output:
 	    print self.name+' with control point at '+str((self.xc,self.yc))+' max error ',maxerror
 	return maxerror
+    
+class InternalStorageWell(Well,InternalStorageEquation):
+    def __init__(self,model,xw=0,yw=0,rw=0.1,Qtot=0,layer=1):
+        Well.__init__(self,model,xw,yw,rw,0.0,layer)
+	self.Nunknowns = self.Nparam
+        self.xc = self.xw + self.rw; self.yc = self.yw # To make sure the point is always the same for all elements
+        self.Qtot  = Qtot
+	self.name = 'InternalStorageWell'
+    def initialize(self):
+        Well.initialize(self)
+    def check(self,full_output=False):
+        h = self.model.phi(self.xc,self.yc) / self.aq.T[:,np.newaxis]
+        maxerror = np.amax( np.abs( h[self.pylayer[:-1],:] - h[self.pylayer[1:],:] ) )
+        maxerror = np.amax( maxerror, np.amax( np.abs( np.sum(self.parameters,0) - self.Qtot ) ) )
+        print 'Error in Q ',np.amax( np.abs( np.sum(self.parameters,0) - self.Qtot ) )
+	if full_output:
+	    print self.name+' with control point at '+str((self.xc,self.yc))+' max error ',maxerror
+	return maxerror
 
 class HconnWell(Well,HconnEquation):
     def __init__(self,model,xw=0,yw=0,rw=0.1,res=0,layer=1):
@@ -701,6 +793,22 @@ class HeadWell(Well,HeadEquation):
 	self.name = 'HeadWell'
     def initialize(self):
         Well.initialize(self)
+	self.pc = self.aq.headToPotential(self.hc,self.pylayer)
+    def check(self,full_output=False):
+        maxerror = np.amax( np.abs( self.pc[:,np.newaxis] / self.model.p - self.model.phi(self.xc,self.yc)[self.pylayer,:] ) )
+	if full_output:
+	    print self.name+' with control point at '+str((self.xc,self.yc))+' max error ',maxerror
+	return maxerror
+    
+class HeadOneD(OneD,HeadEquation):
+    def __init__(self,model,h=0,layer=1,rightside='inf',L=np.inf):
+        OneD.__init__(self,model,0.0,layer,rightside,L)
+	self.Nunknowns = self.Nparam
+        self.hc  = np.atleast_1d(h).astype('d')
+	self.name = 'HeadOneD'
+    def initialize(self):
+        OneD.initialize(self)
+        self.xc, self.yc = 0.0, 0.0
 	self.pc = self.aq.headToPotential(self.hc,self.pylayer)
     def check(self,full_output=False):
         maxerror = np.amax( np.abs( self.pc[:,np.newaxis] / self.model.p - self.model.phi(self.xc,self.yc)[self.pylayer,:] ) )
@@ -849,6 +957,52 @@ def pycontourmovie( ml, xmin, xmax, nx, ymin, ymax, ny, levels = 10, t=0.0, laye
         plt.text(xt,yt,'t=%.2f'%t[i])
         fig.savefig('movie/'+fname+str(1000+i)+'.png')
 
+def pyvertcontour( ml, xmin, xmax, ymin, ymax, nx, zg, levels = 10, t=0.0,\
+	       color = 'k', width = 0.5, style = 'solid',layout = True, newfig = True, \
+	       labels = False, labelfmt = '%1.2f', fill=False, sendback = False):
+    '''Contours head with pylab'''
+    plt.rcParams['contour.negative_linestyle']='solid'
+    # Compute grid
+    xg = np.linspace(xmin,xmax,nx)
+    yg = np.linspace(ymin,ymax,nx)
+    sg = np.sqrt(xg**2 + yg**2)
+    print 'gridding in progress. hit ctrl-c to abort'
+    pot = np.zeros( ( ml.aq.Naq, nx ), 'd' )
+    t = np.atleast_1d(t)
+    for ip in range(nx):
+        pot[:,ip] = ml.head(xg[ip], yg[ip], t)[:,0]
+    # Contour
+    if type(levels) is list:
+        levels = np.arange( levels[0],levels[1],levels[2] )
+    elif levels == 'ask':
+        print ' min,max: ',pot.min(),', ',pot.max(),'. Enter: hmin hmax step '
+        input = raw_input().split()
+        levels = np.arange(float(input[0]),float(input[1])+1e-8,float(input[2]))
+    print 'Levels are ',levels
+    # Colors
+    if color is not None:
+        color = [color]   
+    if newfig:
+        fig = plt.figure( figsize=(8,8) )
+	ax = fig.add_subplot(111)
+    else:
+	fig = plt.gcf()
+	ax = plt.gca()
+    #ax.set_aspect('equal','box')
+    #ax.set_xlim(xmin,xmax); ax.set_ylim(ymin,ymax)
+    #ax.set_autoscale_on(False)
+    if fill:
+        a = ax.contourf( xg, zg, pot, levels )
+    else:
+        if color is None:
+            a = ax.contour( sg, zg, pot, levels, linewidths = width, linestyles = style )
+        else:
+            a = ax.contour( sg, zg, pot, levels, colors = color[0], linewidths = width, linestyles = style )
+    if labels and not fill:
+        ax.clabel(a,fmt=labelfmt)
+    fig.canvas.draw()
+    if sendback == 1: return a
+    if sendback == 2: return sg,zg,pot
     
 def pylayout( ml, ax, color = 'k', overlay = 1, width = 0.5, style = '-' ):
     for e in ml.elementList:
@@ -879,12 +1033,15 @@ def hantushkees(r,t,Q,T,S,c):
     rv[pos] = 2*k0(rho) - w * exp1( rho/2 * np.exp(tau[pos]) ) + (w-1) * exp1( rho * np.cosh(tau[pos]) )
     return -Q/(4*np.pi*T) * rv
 
-#ml = ModelMaq(kaq=[1,2],z=[5,4,3,2,0],c=[100,200],Saq=[0.003,0.004],Sll=[1e-20,1e-20],topboundary='semi',phreatictop=False,tmin=0.01,tmax=10,M=20)
-##ml = ModelMaq(kaq=[1,5.0],z=[14,9,5,2,0],c=[100,100],Saq=[0.003,0.003],Sll=[1e-20,1e-20],topboundary='semi',phreatictop=False,tmin=1,tmax=1000,M=20)
-##ml = Model3D(kaq=[1,2.0,5.0],z=[9,5,2,0],kzoverkh=[.1,.1,.1],Saq=[0.3,0.003],Sll=[0.001],topboundary='imp',phreatictop=True,tmin=1,tmax=10,M=20)
-##ml = TimModel(T=[1.0,5.0],c=[100],Saq=[0.3,0.003],Sll=[0.001],topboundary='imp',tmin=1,tmax=10.0,M=20)
-#w = Well(ml,0.0,0,.1,1,[1])
-#ml.solve()
+ml = ModelMaq(kaq=[1,2],z=[4,3,2,0],c=[200],Saq=[0.003,0.004],Sll=[1e-20],topboundary='imp',phreatictop=False,tmin=0.01,tmax=100,M=40)
+#ml = ModelMaq(kaq=[1,5.0],z=[14,9,5,2,0],c=[100,100],Saq=[0.003,0.003],Sll=[1e-20,1e-20],topboundary='semi',phreatictop=False,tmin=1,tmax=1000,M=20)
+#ml = Model3D(kaq=[1,2.0,5.0],z=[9,5,2,0],kzoverkh=[.1,.1,.1],Saq=[0.3,0.003],Sll=[0.001],topboundary='imp',phreatictop=True,tmin=1,tmax=10,M=20)
+#ml = TimModel(T=[1.0,5.0],c=[100],Saq=[0.3,0.003],Sll=[0.001],topboundary='imp',tmin=1,tmax=10.0,M=20)
+#w = MscreenWell(ml,0.0,0,.1,1,[1,2])
+w = InternalStorageWell(ml,0.0,0,.1,0,[1,2])
+#w = MscreenWell(ml,0.0,0,.1,0,[1,2])
+w2 = MscreenWell(ml,2,0,.1,1,[1,2])
+ml.solve()
 
 ##NEUMAN
 #kaq = 1.0 * np.ones(11)
@@ -907,4 +1064,47 @@ def hantushkees(r,t,Q,T,S,c):
 #h = ml.potential(10,0,t)
 #h = -h*4*np.pi*T/10.0
 ##plot(log10(ts),log10(h[-1]),'r')
+
+##NEUMAN
+#kaq = 1.0 * np.ones(11)
+#z = np.arange(11.0,-1,-1); z[0] = 10.01
+#S = 0.00001 * np.ones(11); S[0] = 0.1
+##
+#T = 10.0; Saq = S[-1] * 10
+#sig = Saq / S[0]
+#ts = 10**np.linspace(-1,5,40)
+#t = ts * Saq * 10**2 / T
+##
+##ml = Model(k=k,z=z,S=S,kzoverkh=1.0,threed=True,tmin=t[0],tmax=t[-1],M=20)
+#ml = Model3D(kaq,z,S,kzoverkh=1,phreatictop=True,tmin=t[0],tmax=t[-1],M=20)
+#w = MscreenWell(ml,0,0,.1,10,range(2,12))
+##for i in range(2,12,1):
+##    w = Well(ml,0,0,.1,1,i)
+### Replace with constant head well
+##w = MscreenWell(ml,0,0,.1,10,range(2,12))
+#ml.solve()
+#h = ml.potential(10,0,t)
+#h = -h*4*np.pi*T/10.0
+##plot(log10(ts),log10(h[-1]),'r')
+
+##ml = ModelMaq(kaq=[1,2,3], z=[5,4,3,2,1,0], c=[100,100], Saq=[0.001,0.001,0.001], Sll=[0.001,0.001], tmin=0.1, tmax=1, M=20)
+#Naq = 51
+#H = 20.0
+#Hstream = 5.0
+#k = 10*np.ones(Naq)
+##k[25] = 0.1
+#Ss = 0.001*np.ones(Naq); Ss[0] = 0.2
+#z = np.zeros(Naq+1)
+#z[0] = H + 0.01
+#z[1:] = np.linspace(H,0,Naq)
+#Nstream = len(z[z>(H-Hstream)])
+#ml = Model3D(kaq=k,z=z,Saq=Ss,kzoverkh=1e-12,phreatictop=True,tmin=0.1,tmax=1,M=20)
+#oned = HeadOneD(ml,h=1,layer=np.arange(1,Nstream+1),rightside='imp',L=50.0)
+##oned = HeadOneD(ml,h=1,layer=np.arange(1,Nstream+1),rightside='inf',L=20.0)
+
+##w = MscreenWell(ml,20,0,.05,0,range(4,11))
+#ml.solve()
+##t = 10**np.linspace(-1,0,100)
+##h = ml.head(20,0,np.linspace(.1,1,100))
+#zp = 0.5*(z[:-1]+z[1:])
 

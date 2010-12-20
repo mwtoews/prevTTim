@@ -16,7 +16,7 @@ if not hasattr(sys, 'version_info') or sys.version_info < (2,3,0,'alpha',0):
 
 
 from distutils.core import setup, Extension
-#from bdist_mpkg import *
+from bdist_mpkg import *
 
 setup (name = "TTim",
 	   extra_path = 'TTim',
