@@ -296,8 +296,10 @@ class Aquifer:
         return p / self.T[pylayer]
     def compute_lab_eigvec(self,p):
         sqrtpSc = np.sqrt( p * self.Sll * self.c )
-        a = sqrtpSc / np.tanh(sqrtpSc)
-        b = sqrtpSc / np.sinh(sqrtpSc)
+        #a = sqrtpSc / np.tanh(sqrtpSc)
+        #b = sqrtpSc / np.sinh(sqrtpSc)
+        a = sqrtpSc / ( (1.0 - np.exp(-2.0*sqrtpSc)) / (1.0 + np.exp(-2.0*sqrtpSc)) )
+        b = sqrtpSc * 2.0 * np.exp(-sqrtpSc) / (1.0 - np.exp(-2.0*sqrtpSc))
         if (self.topboundary == 'sem') or (self.topboundary == 'lea'): dzero = sqrtpSc[0] * np.tanh( sqrtpSc[0] )
         #d0 = np.zeros(self.Naq,'D')
         #d0[1:-1] = p / self.D[1:-1] + a[1:-1] / ( self.c[1:-1] * self.T[1:-1] ) + a[2:] / ( self.c[2:] * self.T[1:-1] )
