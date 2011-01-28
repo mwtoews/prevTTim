@@ -96,7 +96,6 @@ class TimModel:
         t must be ordered and tmin <= t <= tmax'''
         if aq is None: aq = self.aq.findAquiferData(x,y)
         t = np.atleast_1d(t)
-        if (t[0] < self.tmin) or (t[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
         pot = np.zeros((aq.Naq,self.Np),'D')
         for e in self.elementList:
             pot += e.potential(x,y,aq)
@@ -105,7 +104,10 @@ class TimModel:
         if derivative > 0:
             pot *= self.p**derivative
         rv = np.zeros((aq.Naq,len(t)))
+        if (t[0] < self.tmin) or (t[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
         it = 0
+        if (t[0] < self.tmin):
+            it = np.where( t >= self.tmin )[0][0]  # somewhat ugly numpy syntax to find first index where condition is true
         for n in range(self.Nin):
             if n == self.Nin-1:
                 tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
