@@ -17,6 +17,7 @@ def ModelMaq(kaq=[1],z=[1,0],c=[],Saq=[],Sll=[],topboundary='imp',phreatictop=Fa
     Saq = np.atleast_1d(Saq).astype('d')
     Sll = np.atleast_1d(Sll).astype('d')
     H = z[:-1] - z[1:]
+    assert np.all(H >= 0), 'Error: Not all layer thicknesses are non-negative' + str(H) 
     if topboundary[:3] == 'imp':
         assert len(z) == 2*Naq, 'Error: Length of z needs to be ' + str(2*Naq)
         assert len(c) == Naq-1, 'Error: Length of c needs to be ' + str(Naq-1)
@@ -63,7 +64,7 @@ class TimModel:
         self.M = M
         self.aq = Aquifer(self,kaq,Haq,c,Saq,Sll,topboundary)
         self.compute_laplace_parameters()
-        self.name = 'ml'
+        self.name = 'TimModel'
         bessel.initialize()
     def __repr__(self):
         return 'Model'
@@ -106,19 +107,21 @@ class TimModel:
         rv = np.zeros((aq.Naq,len(t)))
         if (t[0] < self.tmin) or (t[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
         it = 0
-        if (t[0] < self.tmin):
-            it = np.where( t >= self.tmin )[0][0]  # somewhat ugly numpy syntax to find first index where condition is true
-        for n in range(self.Nin):
-            if n == self.Nin-1:
-                tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
-            else:
-                tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
-            Nt = len(tp)
-            if Nt > 0:  # if all values zero, don't do the inverse transform
-                for i in range(aq.Naq):
-                    if np.abs( pot[i,n*self.Npin] ) > 1e-20:
-                        rv[i,it:it+Nt] = invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
-                it = it + Nt
+        if t[-1] >= self.tmin:  # Otherwise all zero
+            if (t[0] < self.tmin):
+                it = np.argmax( t >= self.tmin )  # clever call that should be replaced with find_first function when included in numpy
+            for n in range(self.Nin):
+                if n == self.Nin-1:
+                    tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
+                else:
+                    tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
+                Nt = len(tp)
+                if Nt > 0:  # if all values zero, don't do the inverse transform
+                    for i in range(aq.Naq):
+                        if np.abs( pot[i,n*self.Npin] ) > 1e-20:  # First value very small    
+                            #if not np.any( pot[i,n*self.Npin:(n+1)*self.Npin] ) == 0.0: # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
+                                rv[i,it:it+Nt] = invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
+                    it = it + Nt
         return rv
     def head(self,x,y,t,aq=None,derivative=0):
         if aq is None: aq = self.aq.findAquiferData(x,y)
@@ -126,6 +129,45 @@ class TimModel:
         for i in range(aq.Naq):
             pot[i] = aq.potentialToHead(pot[i],i)
         return pot
+    def vdishead(self,x,y,time,aq=None,derivative=0):
+        '''Currently restricted to have only one variable discharge element'''
+        if aq is None: aq = self.aq.findAquiferData(x,y)
+        time = np.atleast_1d(time)
+        pot = np.zeros((aq.Naq,self.Np),'D')
+        for e in self.elementList:
+            pot += e.potential(x,y,aq)
+        pot = np.sum( pot * aq.eigvec, 1 )
+        if derivative > 0: pot *= self.p**derivative
+        # Find element that has variable discharge
+        for e in self.elementList:
+            if e.type == 'variable':
+                tstart = e.tstart
+                delQ = e.delQ
+                break
+        rv = np.zeros((aq.Naq,len(time)))
+        if (time[0] < self.tmin) or (time[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
+        for itime in range(len(tstart)):
+            ts = tstart[itime]
+            t = time - ts
+            it = 0
+            if t[-1] >= self.tmin:  # Otherwise all zero
+                if (t[0] < self.tmin):
+                    it = np.argmax( t >= self.tmin )  # clever call that should be replaced with find_first function when included in numpy
+                for n in range(self.Nin):
+                    if n == self.Nin-1:
+                        tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
+                    else:
+                        tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
+                    Nt = len(tp)
+                    if Nt > 0:  # if all values zero, don't do the inverse transform
+                        for i in range(aq.Naq):
+                            if np.abs( pot[i,n*self.Npin] ) > 1e-20:  # First value very small    
+                                #if not np.any( pot[i,n*self.Npin:(n+1)*self.Npin] ) == 0.0: # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
+                                rv[i,it:it+Nt] += delQ[itime] * invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
+                        it = it + Nt
+        for i in range(aq.Naq):
+            rv[i] = aq.potentialToHead(rv[i],i)
+        return rv
     def phi(self,x,y,aq=None):
         '''array of complex potentials'''
         if aq is None: aq = self.aq.findAquiferData(x,y)
@@ -185,7 +227,8 @@ class TimModel:
             Nt = len(tp)
             if Nt > 0:  # if all values zero, don't do the inverse transform
                 if np.abs( pot[n*self.Npin] ) > 1e-20:
-                    rv[it:it+Nt] = invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
+                    if not np.any( pot[n*self.Npin:(n+1)*self.Npin] == 0.0) : # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
+                        rv[it:it+Nt] = invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
                 it = it + Nt
         return rv
     def solve(self,printmat = 0,sendback=0):
@@ -327,6 +370,7 @@ class Element:
         self.Nparam = Nparam  # Number of parameters
         self.Nunknowns = Nunknowns
         self.parameters = np.zeros( (self.Nparam,self.model.Np), 'D' )
+        self.type = 'constant'
     def initialize(self):
         '''Initialize element'''
         pass
@@ -365,7 +409,7 @@ class Element:
         for i in range(self.Nparam):
             rv[i,:] = np.sum( dis[i] * self.aq.eigvec[self.pylayer[i]], 0 )
         return rv
-    def strength(self,t):
+    def strength(self,t,derivative=0):
         '''returns array of strengths of len(t) t must be ordered and tmin <= t <= tmax'''
         dis = self.dischargeinf()
         #Qdis = self.parameters[0] * dis[0]
@@ -375,9 +419,14 @@ class Element:
         Qdis = np.sum( Qdis * self.aq.eigvec, 1 )
         t = np.atleast_1d(t)
         rv = np.zeros((self.aq.Naq,len(t)))
-        for i in range(self.aq.Naq):
-            print Qdis[i]
-            rv[i] = self.model.inverseLapTran(Qdis[i],t)
+        if derivative == 0:
+            #for i in range(self.aq.Naq):
+            for i in self.pylayer:
+                rv[i] = self.model.inverseLapTran(Qdis[i],t)
+        elif derivative == 1:
+            #for i in range(self.aq.Naq):
+            for i in self.pylayer:
+                rv[i] = self.model.inverseLapTran(ml.p * Qdis[i],t)
         return rv
     def headinside(self,t):
         print "This function not implemented for this element"
@@ -478,22 +527,28 @@ class InternalStorageEquation:
         Returns matrix part (Nunknowns,Neq,Np), complex'''
         mat = np.zeros( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' ) # Important to set to zero for some of the equations
         rhs = np.zeros( (self.Nunknowns, self.model.Np), 'D' )
-        rhs[-1,:] = self.Qtot
+        rhs[-1,:] = self.Qtot / self.model.p
         ieq = 0
         for e in self.model.elementList:
             if e.Nunknowns > 0:
                 head = e.potinflayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis,np.newaxis]
                 mat[:-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:,:] - head[1:,:,:]
-                mat[-1,ieq:ieq+e.Nunknowns,:] -= np.pi * self.rw**2 * self.model.p**2 * head[0,:,:]
+                mat[-1,ieq:ieq+e.Nunknowns,:] -= np.pi * self.rc**2 * self.model.p * head[0,:,:]
                 if e == self:
+                    disterm = self.strengthinflayer() * self.res / ( 2 * np.pi * self.rw * self.aq.Haq[self.pylayer][:,np.newaxis] )
+                    if self.Nunknowns > 1:
+                        for i in range(self.Nunknowns-1):
+                            mat[i,ieq+i,:] -= disterm[i]
+                            mat[i,ieq+i+1,:] += disterm[i+1]
                     mat[-1,ieq:ieq+e.Nunknowns,:] += 1.0
+                    mat[-1,ieq,:] += np.pi * self.rc**2 * self.model.p * disterm[0]
                 ieq += e.Nunknowns
             else:
                 head = e.potentiallayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis]
                 rhs[:-1,:] -= head[:-1,:] - head[1:,:]
-                rhs[-1,:] += np.pi * self.rw**2 * self.model.p**2 * head[0,:]
+                rhs[-1,:] += np.pi * self.rc**2 * self.model.p * head[0,:]
         return mat, rhs
-        
+    
 class InternalStorageSlugEquation:
     def equation(self):
         '''Mix-in class that returns matrix rows for multi-aquifer element with
@@ -501,21 +556,50 @@ class InternalStorageSlugEquation:
         Returns matrix part (Nunknowns,Neq,Np), complex'''
         mat = np.zeros( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' ) # Important to set to zero for some of the equations
         rhs = np.zeros( (self.Nunknowns, self.model.Np), 'D' )
-        rhs[-1,:] = self.Qtot
+        rhs[-1,:] = self.Qtot  # ONLY LINE THAT IS CHANGED FOR SLUG; THIS CAN BE DONE MORE ELEGANT
         ieq = 0
         for e in self.model.elementList:
             if e.Nunknowns > 0:
                 head = e.potinflayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis,np.newaxis]
                 mat[:-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:,:] - head[1:,:,:]
-                mat[-1,ieq:ieq+e.Nunknowns,:] -= np.pi * self.rw**2 * self.model.p * head[0,:,:]
+                mat[-1,ieq:ieq+e.Nunknowns,:] -= np.pi * self.rc**2 * self.model.p * head[0,:,:]
                 if e == self:
-                    mat[-1,ieq:ieq+e.Nunknowns,:] += 1.0 / self.model.p
+                    disterm = self.strengthinflayer() * self.res / ( 2 * np.pi * self.rw * self.aq.Haq[self.pylayer][:,np.newaxis] )
+                    if self.Nunknowns > 1:
+                        for i in range(self.Nunknowns-1):
+                            mat[i,ieq+i,:] -= disterm[i]
+                            mat[i,ieq+i+1,:] += disterm[i+1]
+                    mat[-1,ieq:ieq+e.Nunknowns,:] += 1.0
+                    mat[-1,ieq,:] += np.pi * self.rc**2 * self.model.p * disterm[0]
                 ieq += e.Nunknowns
             else:
                 head = e.potentiallayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis]
                 rhs[:-1,:] -= head[:-1,:] - head[1:,:]
-                rhs[-1,:] += np.pi * self.rw**2 * self.model.p**2 * head[0,:]
+                rhs[-1,:] += np.pi * self.rc**2 * self.model.p * head[0,:]
         return mat, rhs
+        
+#class InternalStorageSlugEquation:
+#    def equation(self):
+#        '''Mix-in class that returns matrix rows for multi-aquifer element with
+#        total given discharge, uniform but unknown head and InternalStorageEquation
+#        Returns matrix part (Nunknowns,Neq,Np), complex'''
+#        mat = np.zeros( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' ) # Important to set to zero for some of the equations
+#        rhs = np.zeros( (self.Nunknowns, self.model.Np), 'D' )
+#        rhs[-1,:] = self.Qtot
+#        ieq = 0
+#        for e in self.model.elementList:
+#            if e.Nunknowns > 0:
+#                head = e.potinflayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis,np.newaxis]
+#                mat[:-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:,:] - head[1:,:,:]
+#                mat[-1,ieq:ieq+e.Nunknowns,:] -= np.pi * self.rw**2 * self.model.p * head[0,:,:]
+#                if e == self:
+#                    mat[-1,ieq:ieq+e.Nunknowns,:] += 1.0 / self.model.p
+#                ieq += e.Nunknowns
+#            else:
+#                head = e.potentiallayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis]
+#                rhs[:-1,:] -= head[:-1,:] - head[1:,:]
+#                rhs[-1,:] += np.pi * self.rw**2 * self.model.p**2 * head[0,:]
+#        return mat, rhs
     
 class HconnEquation:
     def equation(self):
@@ -562,6 +646,10 @@ class Well(Element):
             self.coef[i] = c
         self.coef2 = self.coef.reshape(self.Nparam,self.aq.Naq,self.model.Np) # has shape Nparam,Naq,Np
         self.laboverrwk1 = self.aq.lab2 / (self.rw * kv(1,self.rw/self.aq.lab2))
+        self.setflowcoef()
+    def setflowcoef(self):
+        self.flowcoef = 1.0 / self.model.p  # Step function
+        self.flowcoef2 = self.flowcoef.reshape((self.model.Nin,self.model.Npin))  # Reshape to Nin by Npin
     def potinf(self,x,y,aq=None):
         '''Can be called with only one x,y value'''
         if aq is None: aq = self.model.aq.findAquiferData( x, y )
@@ -573,19 +661,19 @@ class Well(Element):
             for i in range(self.aq.Naq):
                 for j in range(self.model.Nin):
                     if r / abs(self.aq.lab2[i,j,0]) < self.Rzero:
-                        #bessel.besselk0v( x-self.xw, y-self.yw, self.aq.lab2[i,j,:], pot)
-                        bessel.k0besselv( r / self.aq.lab2[i,j,:], pot )
-                        l = j*self.model.Npin
+                        #bessel.k0besselv( r / self.aq.lab2[i,j,:], pot )
+                        pot = kv(0,r / self.aq.lab2[i,j,:])
+                        #l = j*self.model.Npin
                         #for k in range(self.Nparam):
                         #    rv[k,i,j,:] = -1.0 / (2*np.pi*self.model.p[l:l+self.model.Npin]) * self.coef[k,i,j,:] * pot
                         #rv[:,i,j,:] = -1.0 / (2*np.pi*self.model.p[l:l+self.model.Npin]) * self.coef[:,i,j,:] * pot
-                        rv[:,i,j,:] = -1.0 / (2*np.pi*self.model.p[l:l+self.model.Npin]) * self.laboverrwk1[i,j,:] * self.coef[:,i,j,:] * pot
+                        rv[:,i,j,:] = -1.0 / (2*np.pi) * self.laboverrwk1[i,j,:] * self.flowcoef2[j,:] * self.coef[:,i,j,:] * pot
         rv.shape = (self.Nparam,aq.Naq,self.model.Np)
         return rv
     def dischargeinf(self):
         rv = np.zeros((self.Nparam,self.aq.Naq,self.model.Np),'D')
         for i in range(self.aq.Naq):
-            rv[:,i,:] = 1.0 / self.model.p * self.coef2[:,i,:]
+            rv[:,i,:] = self.flowcoef * self.coef2[:,i,:]
         return rv
     def headinside(self,t):
         return self.model.head(self.xw,self.yw,t)[self.pylayer]
@@ -770,41 +858,101 @@ class MscreenWell(Well,MscreenEquation):
             print self.name+' with control point at '+str((self.xc,self.yc))+' max error ',maxerror
         return maxerror
     
+class VdisMscreenWell(MscreenWell):
+    def __init__(self,model,xw=0,yw=0,rw=0.1,tstart=[0],Q=[1.0],layer=1):
+        MscreenWell.__init__(self,model,xw,yw,rw,1.0,layer)
+        self.tstart = np.array(tstart,dtype=float)
+        self.Q = np.array(Q,dtype=float)
+        self.name = 'VdisMscreenWell'
+        self.type = 'variable'
+    def initialize(self):
+        MscreenWell.initialize(self)
+        self.delQ = self.Q.copy()
+        self.delQ[1:] = self.Q[1:] - self.Q[:-1]
+    
 class InternalStorageWell(Well,InternalStorageEquation):
-    def __init__(self,model,xw=0,yw=0,rw=0.1,Qtot=0,layer=1):
+    def __init__(self,model,xw=0,yw=0,rw=0.1,Qtot=0,layer=1,rc=0.0,res=0.0,Rzero=20.0):
         Well.__init__(self,model,xw,yw,rw,0.0,layer)
         self.Nunknowns = self.Nparam
         self.xc = self.xw + self.rw; self.yc = self.yw # To make sure the point is always the same for all elements
         self.Qtot  = Qtot
+        self.rc = rc
+        self.res = res
+        self.Rzero = Rzero
         self.name = 'InternalStorageWell'
     def initialize(self):
         Well.initialize(self)
+    def setflowcoef(self):
+        self.flowcoef = np.ones( self.model.p.shape )  # Delta function
+        self.flowcoef2 = self.flowcoef.reshape((self.model.Nin,self.model.Npin))  # Reshape to Nin by Npin
     def check(self,full_output=False):
         h = self.model.phi(self.xc,self.yc) / self.aq.T[:,np.newaxis]
+        disterm = self.res/( 2.0 * np.pi * self.rw * self.aq.Haq[self.pylayer][:,np.newaxis] ) * self.parameters * self.strengthinflayer()
+        hstar = h[self.pylayer] - disterm
         maxerror = 1e-20
-        if self.Nparam > 1: maxerror = np.amax( np.abs( h[self.pylayer[:-1],:] - h[self.pylayer[1:],:] ) ) # if statemnt needed, else it doesn't work with one layer
-        Q = np.abs( np.sum(self.parameters,0) - np.pi * self.rw**2 * self.model.p**2 * h[self.pylayer[0],:] )
-        maxerror = np.amax( ( maxerror, np.amax( Q - self.Qtot ) ) )
+        if self.Nparam > 1: maxerror = np.amax( np.abs( hstar[:1,:] - hstar[1:,:] ) ) # if statement needed, else it doesn't work with one layer
+        print 'maxerror in heads ',maxerror
+        Q = np.sum(self.parameters,0) - np.pi * self.rc**2 * self.model.p * h[self.pylayer[0],:] + \
+                                        np.pi * self.rc**2 * self.model.p * disterm[0]
+        maxerror = np.amax( ( maxerror, np.amax( np.abs( Q - self.Qtot / self.model.p ) ) ) )
         if full_output:
             print self.name+' with control point at '+str((self.xc,self.yc))+' max error ',maxerror
         return maxerror
     def checktime(self,t):
         # Checks the boundary condition for given time t
         Q = sum( self.strength(t), 0 )
-        h = self.model.phi(self.xw,self.yw) / self.aq.T[:,np.newaxis]
-        dhdt = self.model.inverseLapTran( self.model.p * h[self.pylayer[0]], t )
+        hbar = self.model.phi(self.xw,self.yw) / self.aq.T[:,np.newaxis]
+        dhdt = self.model.inverseLapTran( self.model.p * hbar[self.pylayer[0]], t )
+        dQdt = self.strength(t,1)
         print 'Q ',Q
         print 'dhdt ',dhdt
-        return Q - np.pi * self.rw**2 * dhdt
-        
-        
+        return Q - np.pi * self.rc**2 * dhdt + self.res * self.rc**2 / (2.0 * self.rw * self.aq.Haq[self.pylayer[0]]) * dQdt[self.pylayer[0]]
+       
 class InternalStorageSlugWell(Well,InternalStorageSlugEquation):
+    def __init__(self,model,xw=0,yw=0,rw=0.1,Qtot=0,layer=1,rc=0.0,res=0.0,Rzero=20.0):
+        Well.__init__(self,model,xw,yw,rw,0.0,layer)
+        self.Nunknowns = self.Nparam
+        self.xc = self.xw + self.rw; self.yc = self.yw # To make sure the point is always the same for all elements
+        self.Qtot  = Qtot
+        self.rc = rc
+        self.res = res
+        self.Rzero = Rzero
+        self.name = 'InternalStorageWell'
+    def initialize(self):
+        Well.initialize(self)
+    def setflowcoef(self):
+        self.flowcoef = np.ones( self.model.p.shape )  # Delta function
+        self.flowcoef2 = self.flowcoef.reshape((self.model.Nin,self.model.Npin))  # Reshape to Nin by Npin
+    def check(self,full_output=False):
+        h = self.model.phi(self.xc,self.yc) / self.aq.T[:,np.newaxis]
+        disterm = self.res/( 2.0 * np.pi * self.rw * self.aq.Haq[self.pylayer][:,np.newaxis] ) * self.parameters * self.strengthinflayer()
+        hstar = h[self.pylayer] - disterm
+        maxerror = 1e-20
+        if self.Nparam > 1: maxerror = np.amax( np.abs( hstar[:1,:] - hstar[1:,:] ) ) # if statement needed, else it doesn't work with one layer
+        print 'maxerror in heads ',maxerror
+        Q = np.sum(self.parameters,0) - np.pi * self.rc**2 * self.model.p * h[self.pylayer[0],:] + \
+                                        np.pi * self.rc**2 * self.model.p * disterm[0]
+        maxerror = np.amax( ( maxerror, np.amax( np.abs( Q - self.Qtot ) ) ) )  # Don't divide Qtot by p for slug well
+        if full_output:
+            print self.name+' with control point at '+str((self.xc,self.yc))+' max error ',maxerror
+        return maxerror
+    def checktime(self,t):
+        # Checks the boundary condition for given time t
+        Q = sum( self.strength(t), 0 )
+        hbar = self.model.phi(self.xw,self.yw) / self.aq.T[:,np.newaxis]
+        dhdt = self.model.inverseLapTran( self.model.p * hbar[self.pylayer[0]], t )
+        dQdt = self.strength(t,1)
+        print 'Q ',Q
+        print 'dhdt ',dhdt
+        return Q - np.pi * self.rc**2 * dhdt + self.res * self.rc**2 / (2.0 * self.rw * self.aq.Haq[self.pylayer[0]]) * dQdt[self.pylayer[0]]
+    
+class InternalStorageSlugWellOld(Well,InternalStorageSlugEquation):
     def __init__(self,model,xw=0,yw=0,rw=0.1,Qtot=0,layer=1,Rzero=20.0):
         Well.__init__(self,model,xw,yw,rw,0.0,layer)
         self.Nunknowns = self.Nparam
         self.xc = self.xw + self.rw; self.yc = self.yw # To make sure the point is always the same for all elements
         self.Qtot  = Qtot
-        self.name = 'InternalStorageWell'
+        self.name = 'InternalStorageSlugWell'
         self.Rzero = Rzero
     def initialize(self):
         Well.initialize(self)
@@ -1192,6 +1340,51 @@ def hantushkees(r,t,Q,T,S,c):
     pos = tau>=0
     rv[pos] = 2*k0(rho) - w * exp1( rho/2 * np.exp(tau[pos]) ) + (w-1) * exp1( rho * np.cosh(tau[pos]) )
     return -Q/(4*np.pi*T) * rv
+    
+#ml = Model3D(tmin=0.001,tmax=10)
+#w = VdisMscreenWell(ml,0,0,.1,[0,1,4],Q=[2,5,0])
+#ml.solve()
+#
+#ml1 = Model3D(tmin=0.001,tmax=10)
+#w1 = MscreenWell(ml1,0,0,.1,2)
+#ml1.solve()
+#ml2 = Model3D(tmin=0.001,tmax=10)
+#w2 = MscreenWell(ml2,0,0,.1,3)
+#ml2.solve()
+#ml3 = Model3D(tmin=0.001,tmax=10)
+#w3 = MscreenWell(ml3,0,0,.1,-5)
+#ml3.solve()
+    
+
+#ml = ModelMaq(kaq=[1.0],z=[1,0],Saq=[0.003],tmin=1,tmax=100.0,M=40)
+#w = InternalStorageWell(ml,0,0,0.5,0,[1],rw=0.1,rc=0.1,res=0.0)
+#w2 = InternalStorageWell(ml,4,0,0.5,1,[1],rc=0.1,res=0.0) 
+#ml.solve()
+#
+#def Qrnum(ml,t=1,r=0.1,N=100,d=0.001):
+#    x1 = (r+d)*np.cos(np.arange(0,2*np.pi,(2*np.pi)/N))
+#    x2 = (r+2*d)*np.cos(np.arange(0,2*np.pi,(2*np.pi)/N))
+#    y1 = (r+d)*np.sin(np.arange(0,2*np.pi,(2*np.pi)/N))
+#    y2 = (r+2*d)*np.sin(np.arange(0,2*np.pi,(2*np.pi)/N))
+#    h1 = np.array( [ml.head(x,y,t) for x,y in zip(x1,y1)])
+#    h2 = np.array( [ml.head(x,y,t) for x,y in zip(x2,y2)])
+#    return sum((h2-h1)/d * 2*np.pi*(r+1.5*d)/N * ml.aq.Haq * ml.aq.kaq)
+    
+
+#ml = ModelMaq(kaq=[1.0,5.0,2.0],z=[10,8.0,7.0,4.0,3.5,0],c=[10.,50.],Saq=[0.3,0.01,0.05],Sll=[0.001,0.002],tmin=1e-3,tmax=1000.0,M=40)
+#w = InternalStorageSlugWell(ml,0,0,.1,np.pi*0.1**2*3,[2,3],rc=0.1,res=0.1,Rzero=20)
+#ml.solve()
+#
+#ml2 = ModelMaq(kaq=[1.0,5.0,2.0],z=[10,8.0,7.0,4.0,3.5,0],c=[10.,50.],Saq=[0.3,0.01,0.05],Sll=[0.001,0.002],tmin=1e-3,tmax=1000.0,M=40)
+#w = InternalStorageWell(ml2,0,0,.1,np.pi*0.1**2*3*10000,[2,3],rc=0.1,res=0.1,Rzero=20)
+#ml2.solve()
+
+#ml = ModelMaq(kaq=[1.0,5.0,2.0],z=[10,8.0,7.0,4.0,4.5,0],c=[10.,50.],Saq=[0.3,0.01,0.05],Sll=[0.001,0.002],tmin=100,tmax=1000.0,M=20)
+##w = Well(ml,0.,0,.1,7,[1])
+##w = InternalStorageWell(ml,0,0,.1,7.0,[2,3],rc=0.1,res=0.0,Rzero=1e3)
+##w = InternalStorageWell(ml,0,0,.1,7.0,[2],rc=0.1,res=0.0,Rzero=1e3)
+#w = HeadWell(ml,0,0,.1,7.0,[2])
+#ml.solve()
 
 #ml = ModelMaq(kaq=[1,2],z=[4,3,2,0],c=[200],Saq=[0.003,0.004],Sll=[1e-20],topboundary='imp',phreatictop=False,tmin=0.1,tmax=1,M=20)
 ###ml = ModelMaq(kaq=[1,5.0],z=[14,9,5,2,0],c=[100,100],Saq=[0.003,0.003],Sll=[1e-20,1e-20],topboundary='semi',phreatictop=False,tmin=1,tmax=1000,M=20)
