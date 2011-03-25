@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from bessel import *
 from invlap import *
 from scipy.special import kv # Needed for K1 in Well class
+from cmath import tanh as cmath_tanh
 
 def ModelMaq(kaq=[1],z=[1,0],c=[],Saq=[],Sll=[],topboundary='imp',phreatictop=False,tmin=1,tmax=10,M=20):
     kaq = np.atleast_1d(kaq).astype('d')
@@ -120,7 +121,7 @@ class TimModel:
                     for i in range(aq.Naq):
                         if np.abs( pot[i,n*self.Npin] ) > 1e-20:  # First value very small    
                             #if not np.any( pot[i,n*self.Npin:(n+1)*self.Npin] ) == 0.0: # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
-                                rv[i,it:it+Nt] = invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
+                            rv[i,it:it+Nt] = invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
                     it = it + Nt
         return rv
     def head(self,x,y,t,aq=None,derivative=0):
@@ -129,44 +130,77 @@ class TimModel:
         for i in range(aq.Naq):
             pot[i] = aq.potentialToHead(pot[i],i)
         return pot
-    def vdishead(self,x,y,time,aq=None,derivative=0):
-        '''Currently restricted to have only one variable discharge element'''
+    #def vdishead(self,x,y,time,aq=None,derivative=0):
+    #    '''Currently restricted to only one variable discharge element'''
+    #    if aq is None: aq = self.aq.findAquiferData(x,y)
+    #    time = np.atleast_1d(time)
+    #    pot = np.zeros((aq.Naq,self.Np),'D')
+    #    for e in self.elementList:
+    #        pot += e.potential(x,y,aq)
+    #    pot = np.sum( pot * aq.eigvec, 1 )
+    #    if derivative > 0: pot *= self.p**derivative
+    #    # Find element that has variable discharge
+    #    for e in self.elementList:
+    #        if e.type == 'variable':
+    #            tstart = e.tstart
+    #            delQ = e.delQ
+    #            break
+    #    rv = np.zeros((aq.Naq,len(time)))
+    #    if (time[0] < self.tmin) or (time[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
+    #    for itime in range(len(tstart)):
+    #        ts = tstart[itime]
+    #        t = time - ts
+    #        it = 0
+    #        if t[-1] >= self.tmin:  # Otherwise all zero
+    #            if (t[0] < self.tmin):
+    #                it = np.argmax( t >= self.tmin )  # clever call that should be replaced with find_first function when included in numpy
+    #            for n in range(self.Nin):
+    #                if n == self.Nin-1:
+    #                    tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
+    #                else:
+    #                    tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
+    #                Nt = len(tp)
+    #                if Nt > 0:  # if all values zero, don't do the inverse transform
+    #                    for i in range(aq.Naq):
+    #                        if np.abs( pot[i,n*self.Npin] ) > 1e-20:  # First value very small    
+    #                            #if not np.any( pot[i,n*self.Npin:(n+1)*self.Npin] ) == 0.0: # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
+    #                            rv[i,it:it+Nt] += delQ[itime] * invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
+    #                    it = it + Nt
+    #    for i in range(aq.Naq):
+    #        rv[i] = aq.potentialToHead(rv[i],i)
+    #    return rv
+    def vdisheadwells(self,x,y,time,aq=None,derivative=0):
+        '''Currently restricted to only variable discharge elements'''
         if aq is None: aq = self.aq.findAquiferData(x,y)
         time = np.atleast_1d(time)
-        pot = np.zeros((aq.Naq,self.Np),'D')
-        for e in self.elementList:
-            pot += e.potential(x,y,aq)
-        pot = np.sum( pot * aq.eigvec, 1 )
-        if derivative > 0: pot *= self.p**derivative
-        # Find element that has variable discharge
-        for e in self.elementList:
-            if e.type == 'variable':
-                tstart = e.tstart
-                delQ = e.delQ
-                break
-        rv = np.zeros((aq.Naq,len(time)))
         if (time[0] < self.tmin) or (time[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
-        for itime in range(len(tstart)):
-            ts = tstart[itime]
-            t = time - ts
-            it = 0
-            if t[-1] >= self.tmin:  # Otherwise all zero
-                if (t[0] < self.tmin):
-                    it = np.argmax( t >= self.tmin )  # clever call that should be replaced with find_first function when included in numpy
-                for n in range(self.Nin):
-                    if n == self.Nin-1:
-                        tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
-                    else:
-                        tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
-                    Nt = len(tp)
-                    if Nt > 0:  # if all values zero, don't do the inverse transform
-                        for i in range(aq.Naq):
-                            if np.abs( pot[i,n*self.Npin] ) > 1e-20:  # First value very small    
-                                #if not np.any( pot[i,n*self.Npin:(n+1)*self.Npin] ) == 0.0: # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
-                                rv[i,it:it+Nt] += delQ[itime] * invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
-                        it = it + Nt
-        for i in range(aq.Naq):
-            rv[i] = aq.potentialToHead(rv[i],i)
+        rv = np.zeros((aq.Naq,len(time)))
+        for e in self.elementList:
+            assert e.type == 'variable', "Error: all elements need to be variable discharge elements"
+            tstart = e.tstart
+            delQ = e.delQ
+            pot = e.potential(x,y,aq)
+            pot = np.sum( pot * aq.eigvec, 1 )
+            if derivative > 0: pot *= self.p**derivative
+            for itime in range(len(tstart)):
+                ts = tstart[itime]
+                t = time - ts
+                it = 0
+                if t[-1] >= self.tmin:  # Otherwise all zero
+                    if (t[0] < self.tmin): it = np.argmax( t >= self.tmin )  # clever call that should be replaced with find_first function when included in numpy
+                    for n in range(self.Nin):
+                        if n == self.Nin-1:
+                            tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
+                        else:
+                            tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
+                        Nt = len(tp)
+                        if Nt > 0:  # if all values zero, don't do the inverse transform
+                            for i in range(aq.Naq):
+                                if np.abs( pot[i,n*self.Npin] ) > 1e-20:  # First value very small    
+                                    #if not np.any( pot[i,n*self.Npin:(n+1)*self.Npin] ) == 0.0: # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
+                                    rv[i,it:it+Nt] += delQ[itime] * invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
+                            it = it + Nt
+        for i in range(aq.Naq): rv[i] = aq.potentialToHead(rv[i],i)
         return rv
     def phi(self,x,y,aq=None):
         '''array of complex potentials'''
@@ -339,11 +373,17 @@ class Aquifer:
         return p / self.T[pylayer]
     def compute_lab_eigvec(self,p):
         sqrtpSc = np.sqrt( p * self.Sll * self.c )
-        #a = sqrtpSc / np.tanh(sqrtpSc)
-        #b = sqrtpSc / np.sinh(sqrtpSc)
-        a = sqrtpSc / ( (1.0 - np.exp(-2.0*sqrtpSc)) / (1.0 + np.exp(-2.0*sqrtpSc)) )
-        b = sqrtpSc * 2.0 * np.exp(-sqrtpSc) / (1.0 - np.exp(-2.0*sqrtpSc))
-        if (self.topboundary == 'sem') or (self.topboundary == 'lea'): dzero = sqrtpSc[0] * np.tanh( sqrtpSc[0] )
+        a, b = np.zeros_like(sqrtpSc), np.zeros_like(sqrtpSc)
+        small = np.abs(sqrtpSc) < 200
+        a[small] = sqrtpSc[small] / np.tanh(sqrtpSc[small])
+        b[small] = sqrtpSc[small] / np.sinh(sqrtpSc[small])
+        a[~small] = sqrtpSc[~small] / ( (1.0 - np.exp(-2.0*sqrtpSc[~small])) / (1.0 + np.exp(-2.0*sqrtpSc[~small])) )
+        b[~small] = sqrtpSc[~small] * 2.0 * np.exp(-sqrtpSc[~small]) / (1.0 - np.exp(-2.0*sqrtpSc[~small]))
+        if (self.topboundary == 'sem') or (self.topboundary == 'lea'):
+            if abs(sqrtpSc[0]) < 200:
+                dzero = sqrtpSc[0] * np.tanh( sqrtpSc[0] )
+            else:
+                dzero = sqrtpSc[0] * cmath_tanh( sqrtpSc[0] )
         #d0 = np.zeros(self.Naq,'D')
         #d0[1:-1] = p / self.D[1:-1] + a[1:-1] / ( self.c[1:-1] * self.T[1:-1] ) + a[2:] / ( self.c[2:] * self.T[1:-1] )
         #d0[-1] = p / self.D[-1] + a[-1] / ( self.c[-1] * self.T[-1] )
@@ -861,6 +901,7 @@ class MscreenWell(Well,MscreenEquation):
 class VdisMscreenWell(MscreenWell):
     def __init__(self,model,xw=0,yw=0,rw=0.1,tstart=[0],Q=[1.0],layer=1):
         MscreenWell.__init__(self,model,xw,yw,rw,1.0,layer)
+        assert self.Nunknowns == 1, "Error: VdisMscreenWell can only be screened in one layer"
         self.tstart = np.array(tstart,dtype=float)
         self.Q = np.array(Q,dtype=float)
         self.name = 'VdisMscreenWell'
@@ -1341,19 +1382,35 @@ def hantushkees(r,t,Q,T,S,c):
     rv[pos] = 2*k0(rho) - w * exp1( rho/2 * np.exp(tau[pos]) ) + (w-1) * exp1( rho * np.cosh(tau[pos]) )
     return -Q/(4*np.pi*T) * rv
     
-#ml = Model3D(tmin=0.001,tmax=10)
-#w = VdisMscreenWell(ml,0,0,.1,[0,1,4],Q=[2,5,0])
-#ml.solve()
+ml = Model3D(tmin=0.001,tmax=10,M=40)
+wa = VdisMscreenWell(ml,0,0,.1,[0,1,4],Q=[2,5,0],layer=[1])
+wb = VdisMscreenWell(ml,10,0,.1,[0,2,5],Q=[1,7,0],layer=[2])
+ml.solve()
+x,y = 5,10
+t = np.linspace(0.001,10,200)
+h = ml.vdisheadwells(x,y,t)
 #
-#ml1 = Model3D(tmin=0.001,tmax=10)
-#w1 = MscreenWell(ml1,0,0,.1,2)
-#ml1.solve()
-#ml2 = Model3D(tmin=0.001,tmax=10)
-#w2 = MscreenWell(ml2,0,0,.1,3)
-#ml2.solve()
-#ml3 = Model3D(tmin=0.001,tmax=10)
-#w3 = MscreenWell(ml3,0,0,.1,-5)
-#ml3.solve()
+ml1 = Model3D(tmin=0.001,tmax=10)
+w1 = MscreenWell(ml1,0,0,.1,2)
+ml1.solve()
+ml2 = Model3D(tmin=0.001,tmax=10)
+w2 = MscreenWell(ml2,0,0,.1,3)
+ml2.solve()
+ml3 = Model3D(tmin=0.001,tmax=10)
+w3 = MscreenWell(ml3,0,0,.1,-5)
+ml3.solve()
+ml1b = Model3D(tmin=0.001,tmax=10)
+w1b = MscreenWell(ml1b,10,0,.1,1,layer=[2])
+ml1b.solve()
+ml2b = Model3D(tmin=0.001,tmax=10)
+w2b = MscreenWell(ml2b,10,0,.1,6,layer=[2])
+ml2b.solve()
+ml3b = Model3D(tmin=0.001,tmax=10)
+w3b = MscreenWell(ml3b,10,0,.1,-7,layer=[2])
+ml3b.solve()
+x,y = 5,10
+t = np.linspace(0.001,10,200)
+hb = ml1.head(x,y,t)+ml2.head(x,y,t-1)+ml3.head(x,y,t-4)+ml1b.head(x,y,t)+ml2b.head(x,y,t-2)+ml3b.head(x,y,t-5)
     
 
 #ml = ModelMaq(kaq=[1.0],z=[1,0],Saq=[0.003],tmin=1,tmax=100.0,M=40)
