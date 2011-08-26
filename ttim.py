@@ -76,7 +76,8 @@ class TimModel:
         itmax = int(np.ceil(np.log10(self.tmax)))
         self.tintervals = np.arange(itmin,itmax+1)
         self.tintervals = 10.0**self.tintervals
-        alpha = 0.0
+        #alpha = 1.0
+        alpha = 0.0  # I don't see why it shouldn't be 0.0
         tol = 1e-9
         self.Nin = itmax - itmin
         run = np.arange(2*self.M+1)  # so there are 2M+1 terms in Fourier series expansion
@@ -130,45 +131,45 @@ class TimModel:
         for i in range(aq.Naq):
             pot[i] = aq.potentialToHead(pot[i],i)
         return pot
-    #def vdishead(self,x,y,time,aq=None,derivative=0):
-    #    '''Currently restricted to only one variable discharge element'''
-    #    if aq is None: aq = self.aq.findAquiferData(x,y)
-    #    time = np.atleast_1d(time)
-    #    pot = np.zeros((aq.Naq,self.Np),'D')
-    #    for e in self.elementList:
-    #        pot += e.potential(x,y,aq)
-    #    pot = np.sum( pot * aq.eigvec, 1 )
-    #    if derivative > 0: pot *= self.p**derivative
-    #    # Find element that has variable discharge
-    #    for e in self.elementList:
-    #        if e.type == 'variable':
-    #            tstart = e.tstart
-    #            delQ = e.delQ
-    #            break
-    #    rv = np.zeros((aq.Naq,len(time)))
-    #    if (time[0] < self.tmin) or (time[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
-    #    for itime in range(len(tstart)):
-    #        ts = tstart[itime]
-    #        t = time - ts
-    #        it = 0
-    #        if t[-1] >= self.tmin:  # Otherwise all zero
-    #            if (t[0] < self.tmin):
-    #                it = np.argmax( t >= self.tmin )  # clever call that should be replaced with find_first function when included in numpy
-    #            for n in range(self.Nin):
-    #                if n == self.Nin-1:
-    #                    tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
-    #                else:
-    #                    tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
-    #                Nt = len(tp)
-    #                if Nt > 0:  # if all values zero, don't do the inverse transform
-    #                    for i in range(aq.Naq):
-    #                        if np.abs( pot[i,n*self.Npin] ) > 1e-20:  # First value very small    
-    #                            #if not np.any( pot[i,n*self.Npin:(n+1)*self.Npin] ) == 0.0: # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
-    #                            rv[i,it:it+Nt] += delQ[itime] * invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
-    #                    it = it + Nt
-    #    for i in range(aq.Naq):
-    #        rv[i] = aq.potentialToHead(rv[i],i)
-    #    return rv
+    def vdishead(self,x,y,time,aq=None,derivative=0):
+        '''Currently restricted to only one variable discharge element'''
+        if aq is None: aq = self.aq.findAquiferData(x,y)
+        time = np.atleast_1d(time)
+        pot = np.zeros((aq.Naq,self.Np),'D')
+        for e in self.elementList:
+            pot += e.potential(x,y,aq)
+        pot = np.sum( pot * aq.eigvec, 1 )
+        if derivative > 0: pot *= self.p**derivative
+        # Find element that has variable discharge
+        for e in self.elementList:
+            if e.type == 'variable':
+                tstart = e.tstart
+                delQ = e.delQ
+                break
+        rv = np.zeros((aq.Naq,len(time)))
+        if (time[0] < self.tmin) or (time[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
+        for itime in range(len(tstart)):
+            ts = tstart[itime]
+            t = time - ts
+            it = 0
+            if t[-1] >= self.tmin:  # Otherwise all zero
+                if (t[0] < self.tmin):
+                    it = np.argmax( t >= self.tmin )  # clever call that should be replaced with find_first function when included in numpy
+                for n in range(self.Nin):
+                    if n == self.Nin-1:
+                        tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
+                    else:
+                        tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
+                    Nt = len(tp)
+                    if Nt > 0:  # if all values zero, don't do the inverse transform
+                        for i in range(aq.Naq):
+                            if np.abs( pot[i,n*self.Npin] ) > 1e-20:  # First value very small    
+                                #if not np.any( pot[i,n*self.Npin:(n+1)*self.Npin] ) == 0.0: # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
+                                rv[i,it:it+Nt] += delQ[itime] * invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
+                        it = it + Nt
+        for i in range(aq.Naq):
+            rv[i] = aq.potentialToHead(rv[i],i)
+        return rv
     def vdisheadwells(self,x,y,time,aq=None,derivative=0):
         '''Currently restricted to only variable discharge elements'''
         if aq is None: aq = self.aq.findAquiferData(x,y)
@@ -466,7 +467,7 @@ class Element:
         elif derivative == 1:
             #for i in range(self.aq.Naq):
             for i in self.pylayer:
-                rv[i] = self.model.inverseLapTran(ml.p * Qdis[i],t)
+                rv[i] = self.model.inverseLapTran(self.model.p * Qdis[i],t)
         return rv
     def headinside(self,t):
         print "This function not implemented for this element"
@@ -701,8 +702,8 @@ class Well(Element):
             for i in range(self.aq.Naq):
                 for j in range(self.model.Nin):
                     if r / abs(self.aq.lab2[i,j,0]) < self.Rzero:
-                        #bessel.k0besselv( r / self.aq.lab2[i,j,:], pot )
-                        pot = kv(0,r / self.aq.lab2[i,j,:])
+                        bessel.k0besselv( r / self.aq.lab2[i,j,:], pot )
+                        #pot = kv(0,r / self.aq.lab2[i,j,:])
                         #l = j*self.model.Npin
                         #for k in range(self.Nparam):
                         #    rv[k,i,j,:] = -1.0 / (2*np.pi*self.model.p[l:l+self.model.Npin]) * self.coef[k,i,j,:] * pot
@@ -923,6 +924,7 @@ class InternalStorageWell(Well,InternalStorageEquation):
         self.name = 'InternalStorageWell'
     def initialize(self):
         Well.initialize(self)
+        self.resfac = self.res * self.aq.T[self.pylayer] * self.aq.Haq[self.pylayer] / (2*np.pi*self.rw)
     def setflowcoef(self):
         self.flowcoef = np.ones( self.model.p.shape )  # Delta function
         self.flowcoef2 = self.flowcoef.reshape((self.model.Nin,self.model.Npin))  # Reshape to Nin by Npin
@@ -948,6 +950,8 @@ class InternalStorageWell(Well,InternalStorageEquation):
         print 'Q ',Q
         print 'dhdt ',dhdt
         return Q - np.pi * self.rc**2 * dhdt + self.res * self.rc**2 / (2.0 * self.rw * self.aq.Haq[self.pylayer[0]]) * dQdt[self.pylayer[0]]
+    def headinside(self,t):
+        return self.model.head(self.xw,self.yw,t)[self.pylayer] - self.resfac[:,np.newaxis] / self.aq.T[:,np.newaxis] * self.strength(t)[self.pylayer]
        
 class InternalStorageSlugWell(Well,InternalStorageSlugEquation):
     def __init__(self,model,xw=0,yw=0,rw=0.1,Qtot=0,layer=1,rc=0.0,res=0.0,Rzero=20.0):
@@ -961,6 +965,7 @@ class InternalStorageSlugWell(Well,InternalStorageSlugEquation):
         self.name = 'InternalStorageWell'
     def initialize(self):
         Well.initialize(self)
+        self.resfac = self.res * self.aq.T[self.pylayer] * self.aq.Haq[self.pylayer] / (2*np.pi*self.rw)
     def setflowcoef(self):
         self.flowcoef = np.ones( self.model.p.shape )  # Delta function
         self.flowcoef2 = self.flowcoef.reshape((self.model.Nin,self.model.Npin))  # Reshape to Nin by Npin
@@ -986,25 +991,8 @@ class InternalStorageSlugWell(Well,InternalStorageSlugEquation):
         print 'Q ',Q
         print 'dhdt ',dhdt
         return Q - np.pi * self.rc**2 * dhdt + self.res * self.rc**2 / (2.0 * self.rw * self.aq.Haq[self.pylayer[0]]) * dQdt[self.pylayer[0]]
-    
-class InternalStorageSlugWellOld(Well,InternalStorageSlugEquation):
-    def __init__(self,model,xw=0,yw=0,rw=0.1,Qtot=0,layer=1,Rzero=20.0):
-        Well.__init__(self,model,xw,yw,rw,0.0,layer)
-        self.Nunknowns = self.Nparam
-        self.xc = self.xw + self.rw; self.yc = self.yw # To make sure the point is always the same for all elements
-        self.Qtot  = Qtot
-        self.name = 'InternalStorageSlugWell'
-        self.Rzero = Rzero
-    def initialize(self):
-        Well.initialize(self)
-    def check(self,full_output=False):
-        h = self.model.phi(self.xc,self.yc) / self.aq.T[:,np.newaxis]
-        maxerror = np.amax( np.abs( h[self.pylayer[:-1],:] - h[self.pylayer[1:],:] ) )
-        maxerror = np.amax( maxerror, np.amax( np.abs( np.sum(self.parameters,0) - self.Qtot ) ) )
-        print 'Error in Q ',np.amax( np.abs( np.sum(self.parameters,0) - self.Qtot ) )
-        if full_output:
-            print self.name+' with control point at '+str((self.xc,self.yc))+' max error ',maxerror
-        return maxerror
+    def headinside(self,t):
+        return self.model.head(self.xw,self.yw,t)[self.pylayer] - self.resfac[:,np.newaxis] / self.aq.T[:,np.newaxis] * self.strength(t)[self.pylayer]
 
 class HconnWell(Well,HconnEquation):
     def __init__(self,model,xw=0,yw=0,rw=0.1,res=0,layer=1):
@@ -1118,6 +1106,14 @@ class HeadLineSink(LineSink,HeadEquation):
             print self.name+' with control point at '+str((self.xc,self.yc))+' max error ',maxerror
         return maxerror
     
+def HeadLineSinkString(ml,xy=[(-1,0),(1,0)],h=0,layer=1):
+    # Helper function to create string of line-sinks
+    lslist = []
+    for i in range(len(xy)-1):
+        ls = HeadLineSink(ml,xy[i,0],xy[i,1],xy[i+1,0],xy[i+1,1],h,layer)
+        lslist.append(ls)
+    return lslist
+    
 class ResistanceWell(Well,ResistanceEquation):
     def __init__(self,model,xw=0,yw=0,rw=0.1,h=0,c=0,layer=1):
         Well.__init__(self,model,xw,yw,rw,0.0,layer)
@@ -1181,7 +1177,7 @@ class ResistanceLineSink(LineSink,ResistanceEquation):
         return maxerror
 
     
-def xsection(ml,x1=0,x2=1,y1=0,y2=0,N=100,t=1,layer=1,color=None,newfig=True,sendback=False):
+def xsection(ml,x1=0,x2=1,y1=0,y2=0,N=100,t=1,layer=1,color=None,lw=1,newfig=True,sendback=False):
     if newfig: plt.figure()
     x = np.linspace(x1,x2,N)
     y = np.linspace(y1,y2,N)
@@ -1194,9 +1190,9 @@ def xsection(ml,x1=0,x2=1,y1=0,y2=0,N=100,t=1,layer=1,color=None,newfig=True,sen
     for i in range(len(t)):
         for j in range(len(pylayer)):
             if color is None:
-                plt.plot(s,h[:,j,i])
+                plt.plot(s,h[:,j,i],lw=lw)
             else:
-                plt.plot(s,h[:,j,i],color)
+                plt.plot(s,h[:,j,i],color,lw=lw)
     if sendback:
         return s,h
     
@@ -1235,7 +1231,7 @@ def pycontour( ml, xmin, xmax, nx, ymin, ymax, ny, levels = 10, t=0.0, layer = 1
     if type(levels) is list:
         levels = np.arange( levels[0],levels[1],levels[2] )
     elif levels == 'ask':
-        print ' min,max: ',pot.min(),', ',pot.max(),'. Enter: hmin hmax step '
+        print ' min,max: ',pot[layer-1,:,:].min(),', ',pot[layer-1,:,:].max(),'. Enter: hmin hmax step '
         input = raw_input().split()
         levels = np.arange(float(input[0]),float(input[1])+1e-8,float(input[2]))
     print 'Levels are ',levels
@@ -1314,7 +1310,7 @@ def pyvertcontour( ml, xmin, xmax, ymin, ymax, nx, zg, levels = 10, t=0.0,\
     # Compute grid
     xg = np.linspace(xmin,xmax,nx)
     yg = np.linspace(ymin,ymax,nx)
-    sg = np.sqrt(xg**2 + yg**2)
+    sg = np.sqrt((xg-xg[0])**2 + (yg-yg[0])**2)
     print 'gridding in progress. hit ctrl-c to abort'
     pot = np.zeros( ( ml.aq.Naq, nx ), 'd' )
     t = np.atleast_1d(t)
@@ -1337,11 +1333,11 @@ def pyvertcontour( ml, xmin, xmax, ymin, ymax, nx, zg, levels = 10, t=0.0,\
     else:
         fig = plt.gcf()
         ax = plt.gca()
-    #ax.set_aspect('equal','box')
-    #ax.set_xlim(xmin,xmax); ax.set_ylim(ymin,ymax)
-    #ax.set_autoscale_on(False)
+    ax.set_aspect('equal','box')
+    ax.set_xlim(sg.min(),sg.max()); ax.set_ylim(zg.min(),zg.max())
+    ax.set_autoscale_on(False)
     if fill:
-        a = ax.contourf( xg, zg, pot, levels )
+        a = ax.contourf( sg, zg, pot, levels )
     else:
         if color is None:
             a = ax.contour( sg, zg, pot, levels, linewidths = width, linestyles = style )
@@ -1382,35 +1378,42 @@ def hantushkees(r,t,Q,T,S,c):
     rv[pos] = 2*k0(rho) - w * exp1( rho/2 * np.exp(tau[pos]) ) + (w-1) * exp1( rho * np.cosh(tau[pos]) )
     return -Q/(4*np.pi*T) * rv
     
-ml = Model3D(tmin=0.001,tmax=10,M=40)
-wa = VdisMscreenWell(ml,0,0,.1,[0,1,4],Q=[2,5,0],layer=[1])
-wb = VdisMscreenWell(ml,10,0,.1,[0,2,5],Q=[1,7,0],layer=[2])
-ml.solve()
-x,y = 5,10
-t = np.linspace(0.001,10,200)
-h = ml.vdisheadwells(x,y,t)
-#
-ml1 = Model3D(tmin=0.001,tmax=10)
-w1 = MscreenWell(ml1,0,0,.1,2)
-ml1.solve()
-ml2 = Model3D(tmin=0.001,tmax=10)
-w2 = MscreenWell(ml2,0,0,.1,3)
-ml2.solve()
-ml3 = Model3D(tmin=0.001,tmax=10)
-w3 = MscreenWell(ml3,0,0,.1,-5)
-ml3.solve()
-ml1b = Model3D(tmin=0.001,tmax=10)
-w1b = MscreenWell(ml1b,10,0,.1,1,layer=[2])
-ml1b.solve()
-ml2b = Model3D(tmin=0.001,tmax=10)
-w2b = MscreenWell(ml2b,10,0,.1,6,layer=[2])
-ml2b.solve()
-ml3b = Model3D(tmin=0.001,tmax=10)
-w3b = MscreenWell(ml3b,10,0,.1,-7,layer=[2])
-ml3b.solve()
-x,y = 5,10
-t = np.linspace(0.001,10,200)
-hb = ml1.head(x,y,t)+ml2.head(x,y,t-1)+ml3.head(x,y,t-4)+ml1b.head(x,y,t)+ml2b.head(x,y,t-2)+ml3b.head(x,y,t-5)
+## TTim_bug1
+#ml = ModelMaq(kaq=[10,10],z=[4,2,1,0],c=[100],Saq=[1e-5,1e-5],Sll=[1e-8],tmin=1e5,tmax=1e6,M=20)
+#w = Well(ml,0,0,.1,1)
+#ml.solve()
+#t = np.linspace(1e5,1e6,5)
+#h = ml.head(0,.5,t)
+    
+#ml = Model3D(tmin=0.001,tmax=10,M=20)
+#wa = VdisMscreenWell(ml,0,0,.1,[0,1,4],Q=[2,5,0],layer=[3])
+#wb = HeadWell(ml,10,0,.1,0,[1])
+#ml.solve()
+#x,y = 5,10
+#t = np.linspace(0.001,10,200)
+#h = ml.vdisheadwells(x,y,t)
+##
+#ml1 = Model3D(tmin=0.001,tmax=10)
+#w1 = MscreenWell(ml1,0,0,.1,2)
+#ml1.solve()
+#ml2 = Model3D(tmin=0.001,tmax=10)
+#w2 = MscreenWell(ml2,0,0,.1,3)
+#ml2.solve()
+#ml3 = Model3D(tmin=0.001,tmax=10)
+#w3 = MscreenWell(ml3,0,0,.1,-5)
+#ml3.solve()
+#ml1b = Model3D(tmin=0.001,tmax=10)
+#w1b = MscreenWell(ml1b,10,0,.1,1,layer=[2])
+#ml1b.solve()
+#ml2b = Model3D(tmin=0.001,tmax=10)
+#w2b = MscreenWell(ml2b,10,0,.1,6,layer=[2])
+#ml2b.solve()
+#ml3b = Model3D(tmin=0.001,tmax=10)
+#w3b = MscreenWell(ml3b,10,0,.1,-7,layer=[2])
+#ml3b.solve()
+#x,y = 5,10
+#t = np.linspace(0.001,10,200)
+#hb = ml1.head(x,y,t)+ml2.head(x,y,t-1)+ml3.head(x,y,t-4)+ml1b.head(x,y,t-1)+ml2b.head(x,y,t-2)+ml3b.head(x,y,t-5)
     
 
 #ml = ModelMaq(kaq=[1.0],z=[1,0],Saq=[0.003],tmin=1,tmax=100.0,M=40)
