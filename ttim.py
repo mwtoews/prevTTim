@@ -72,6 +72,12 @@ class TimModel:
     def addElement(self,el):
         self.elementList.append(el)
     def compute_laplace_parameters(self):
+        '''
+        Nin: Number of time intervals
+        Npin: Number of p values per interval
+        Np: Total number of p values (Nin*Np)
+        p[Np]: Array with p values
+        '''
         itmin = int(np.floor(np.log10(self.tmin)))
         itmax = int(np.ceil(np.log10(self.tmax)))
         self.tintervals = np.arange(itmin,itmax+1)
@@ -204,7 +210,7 @@ class TimModel:
         for i in range(aq.Naq): rv[i] = aq.potentialToHead(rv[i],i)
         return rv
     def phi(self,x,y,aq=None):
-        '''array of complex potentials'''
+        '''Returns the potential in Laplace space pot[Naq,Np] Used in check functions'''
         if aq is None: aq = self.aq.findAquiferData(x,y)
         pot = np.zeros((aq.Naq,self.Np),'D')
         for e in self.elementList:
@@ -212,14 +218,11 @@ class TimModel:
         pot = np.sum( pot * aq.eigvec, 1 )
         return pot
     def phihead(self,x,y,aq=None):
-        '''array of complex heads'''
         if aq is None: aq = self.aq.findAquiferData(x,y)
-        pot = np.zeros((aq.Naq,self.Np),'D')
-        for e in self.elementList:
-            pot += e.potential(x,y,aq)
-        pot = np.sum( pot * aq.eigvec, 1 )
-        return pot / aq.T[:,np.newaxis]
+        return phi(x,y,aq) / aq.T[:,np.newaxis]
     def headgrid(self,x1,x2,nx,y1,y2,ny,t):
+        '''Returns h[Naq,Ntimes,Ny,Nx] 
+        '''
         xg,yg = np.meshgrid( np.linspace(x1,x2,nx), np.linspace(y1,y2,ny) ) 
         t = np.atleast_1d(t)
         hphi = np.zeros( ( self.aq.Naq, self.Np, ny, nx ), 'D' )
@@ -254,17 +257,19 @@ class TimModel:
         t = np.atleast_1d(t)
         rv = np.zeros(len(t))
         it = 0
-        for n in range(self.Nin):
-            if n == self.Nin-1:
-                tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
-            else:
-                tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
-            Nt = len(tp)
-            if Nt > 0:  # if all values zero, don't do the inverse transform
-                if np.abs( pot[n*self.Npin] ) > 1e-20:
-                    if not np.any( pot[n*self.Npin:(n+1)*self.Npin] == 0.0) : # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
-                        rv[it:it+Nt] = invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
-                it = it + Nt
+        if t[-1] >= self.tmin:  # Otherwise all zero
+            if (t[0] < self.tmin): it = np.argmax( t >= self.tmin )  # clever call that should be replaced with find_first function when included in numpy
+            for n in range(self.Nin):
+                if n == self.Nin-1:
+                    tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
+                else:
+                    tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
+                Nt = len(tp)
+                if Nt > 0:  # if all values zero, don't do the inverse transform
+                    if np.abs( pot[n*self.Npin] ) > 1e-20:
+                        if not np.any( pot[n*self.Npin:(n+1)*self.Npin] == 0.0) : # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
+                            rv[it:it+Nt] = invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
+                    it = it + Nt
         return rv
     def solve(self,printmat = 0,sendback=0):
         '''Compute solution'''
@@ -329,6 +334,13 @@ class Aquifer:
     def __repr__(self):
         return 'Aquifer T: ' + str(self.T)
     def initialize(self):
+        '''
+        eigval[Naq,Np]: Array with eigenvalues
+        lab[Naq,Np]: Array with lambda values
+        lab2[Naq,Nin,Npin]: Array with lambda values reorganized per interval
+        eigvec[Naq,Naq,Np]: Array with eigenvector matrices
+        coef[Naq,Naq,Np]: Array with coefficients
+        '''
         self.eigval = []
         self.eigvec = []
         self.coef = []
@@ -1263,44 +1275,45 @@ def pycontour( ml, xmin, xmax, nx, ymin, ymax, ny, levels = 10, t=0.0, layer = 1
     
 def pycontourmovie( ml, xmin, xmax, nx, ymin, ymax, ny, levels = 10, t=0.0, layer = 1,\
                color = None, width = 0.5, style = 'solid',layout = True, newfig = True, \
-               labels = False, labelfmt = '%1.3f', fill=False, fname='timmovie',xt=0.0,yt=0.0):
+               labels = False, labelfmt = '%1.3f', fill=False, fname='timmovie',xt=0.0,yt=0.0,sendback=False):
     '''Contours head with pylab'''
     plt.rcParams['contour.negative_linestyle']='solid'
     # Compute grid
     xg,yg = np.meshgrid( np.linspace(xmin,xmax,nx), np.linspace(ymin,ymax,ny) ) 
     print 'grid of '+str((nx,ny))+'. gridding in progress. hit ctrl-c to abort'
     t = np.atleast_1d(t)
-    hphi = np.zeros( ( ml.Np, ny, nx ), 'd' )
-    pylayer = layer - 1
+    hphi = np.zeros( ( ny, nx, ml.aq.Naq, ml.Np ), 'D' )
     for irow in range(ny):
         for jcol in range(nx):
-            hphi[:,irow,jcol] = ml.phihead(xg[irow,jcol], yg[irow,jcol])[pylayer]
+            hphi[irow,jcol] = ml.phihead(xg[irow,jcol], yg[irow,jcol])
     # Contour
     # Colors
-    h = np.zeros( (len(t),ny,nx) )
+    h = np.zeros( (len(t),ml.aq.Naq,ny,nx) )
     for irow in range(ny):
         for jcol in range(nx):
-            h[:,irow,jcol] = ml.inverseLapTran(hphi[:,irow,jcol],t)
-    if color is not None:
-        color = [color]   
-    for i in range(len(t)):
-        fig = plt.figure( figsize=(8,8) )
-        ax = fig.add_subplot(111)
-        ax.set_aspect('equal','box')
-        ax.set_xlim(xmin,xmax); ax.set_ylim(ymin,ymax)
-        ax.set_autoscale_on(False)
-        if layout: pylayout(ml,ax,color='b',width=2)
-        if fill:
-            a = ax.contourf( xg, yg, h[i], levels )
-        else:
-            if color is None:
-                a = ax.contour( xg, yg, h[i], levels, linewidths = width, linestyles = style )
-            else:
-                a = ax.contour( xg, yg, h[i], levels, colors = color[0], linewidths = width, linestyles = style )
-        if labels and not fill:
-            ax.clabel(a,fmt=labelfmt)
-        plt.text(xt,yt,'t=%.2f'%t[i])
-        fig.savefig('movie/'+fname+str(1000+i)+'.png')
+            for ilayer in range(ml.aq.Naq):
+                h[:,ilayer,irow,jcol] = ml.inverseLapTran(hphi[irow,jcol,ilayer],t)
+    return xg,yg,h
+    #if color is not None:
+    #    color = [color]   
+    #for i in range(len(t)):
+    #    fig = plt.figure( figsize=(8,8) )
+    #    ax = fig.add_subplot(111)
+    #    ax.set_aspect('equal','box')
+    #    ax.set_xlim(xmin,xmax); ax.set_ylim(ymin,ymax)
+    #    ax.set_autoscale_on(False)
+    #    if layout: pylayout(ml,ax,color='b',width=2)
+    #    if fill:
+    #        a = ax.contourf( xg, yg, h[i], levels )
+    #    else:
+    #        if color is None:
+    #            a = ax.contour( xg, yg, h[i], levels, linewidths = width, linestyles = style )
+    #        else:
+    #            a = ax.contour( xg, yg, h[i], levels, colors = color[0], linewidths = width, linestyles = style )
+    #    if labels and not fill:
+    #        ax.clabel(a,fmt=labelfmt)
+    #    plt.text(xt,yt,'t=%.2f'%t[i])
+    #    fig.savefig('movie/'+fname+str(1000+i)+'.png')
 
 def pyvertcontour( ml, xmin, xmax, ymin, ymax, nx, zg, levels = 10, t=0.0,\
                color = 'k', width = 0.5, style = 'solid',layout = True, newfig = True, \
