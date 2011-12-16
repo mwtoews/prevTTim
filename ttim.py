@@ -221,8 +221,7 @@ class TimModel:
         if aq is None: aq = self.aq.findAquiferData(x,y)
         return phi(x,y,aq) / aq.T[:,np.newaxis]
     def headgrid(self,x1,x2,nx,y1,y2,ny,t):
-        '''Returns h[Naq,Ntimes,Ny,Nx] 
-        '''
+        '''Returns h[Naq,Ntimes,Ny,Nx]'''
         xg,yg = np.meshgrid( np.linspace(x1,x2,nx), np.linspace(y1,y2,ny) ) 
         t = np.atleast_1d(t)
         hphi = np.zeros( ( self.aq.Naq, self.Np, ny, nx ), 'D' )
@@ -423,12 +422,12 @@ class Element:
         self.Nparam = Nparam  # Number of parameters
         self.Nunknowns = Nunknowns
         self.parameters = np.zeros( (self.Nparam,self.model.Np), 'D' )
-        self.type = 'constant'
+        self.type = 'constant'  # 'constant' boundary condition through time or 'variable' boundary condition through time 
     def initialize(self):
         '''Initialize element'''
         pass
     def potinf(self,x,y,aq=None):
-        '''Returns 2D complex array of size (Naq,Np) or (Nparam,Naq,Np) if Nparam > 1'''
+        '''Returns 2D complex array of size (Nparam,Naq,Np)'''
         raise 'Must overload Element.potinf()'
     def potential(self,x,y,aq=None):
         '''Returns complex array of size (Naq,Np)'''
