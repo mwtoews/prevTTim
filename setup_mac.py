@@ -6,27 +6,34 @@
 #	   python setup.py bdist --format=wininst
 #	   python setup.py bdist --format=rpm
 #	   python setup.py sdist --formats=gztar,zip
-
-# This setup script authored by Philippe Le Grand, June 13th 2005
+#
+# To create Mac installer:
+# Install py2app
+# At terminal prompt:
+# bdist_mpkg setup.py build
+# Installer assumes that sitepackages are installed in sys.prefix+'/lib/python2.pyver/site-packages/ttim as is the case in EPD
+# pyver needs to be set to the correct value
 
 import sys
 
-if not hasattr(sys, 'version_info') or sys.version_info < (2,3,0,'alpha',0):
-	raise SystemExit, "Python 2.6 or later required to build TTim"
+#if not hasattr(sys, 'version_info') or sys.version_info < (2,3,0,'alpha',0):
+#	raise SystemExit, "Python 2.6 or later required to build TTim"
 
 
 from distutils.core import setup, Extension
-from bdist_mpkg import *
 
-setup (name = "TTim",
-	   extra_path = 'TTim',
-	   version = "0.0.1.py26",
+# Specify Python version 2.pyver:
+pyver = 7
+
+setup (name = "ttim",
+	   extra_path = 'ttim',
+	   version = "0.1",
 	   author="Mark Bakker",
 	   author_email="mark.bakker@tudelft.nl",
-	   py_modules = ["ttim","ttimtest1","ttimtest2","ttimtest3","ttimtest4"],
+	   py_modules = ["ttim2"],
 # This trick might be original; I haven't found it anywhere.
 # The precompiled Fortran library is passed as a data file,
 # so that dist does not try and recompile on the destination machine
-       data_files = [("Lib/site-packages/ttim",["bessel.so","invlap.so"])]
+       data_files = [(sys.prefix+'/lib/python2.'+str(pyver)+'/site-packages/ttim',["bessel.so","invlap.so"])]
 #	   ext_modules= [Extension("besselaes",["besselaes.f90","trianglemodule.c"])]
 	   )
