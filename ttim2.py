@@ -556,6 +556,7 @@ class WellBase(Element):
         laboverrwk1 = self.aq.lab / (self.rw * kv(1,self.rw/self.aq.lab))
         self.setflowcoef()
         self.term = -1.0 / (2*np.pi) * laboverrwk1 * self.flowcoef * coef  # shape (self.Nparam,self.aq.Naq,self.model.Np)
+#        self.term = -1.0 / (2*np.pi) * self.flowcoef * coef  # shape (self.Nparam,self.aq.Naq,self.model.Np)
         self.term2 = self.term.reshape(self.Nparam,self.aq.Naq,self.model.Nin,self.model.Npin)
         self.strengthinf = self.flowcoef * coef
         self.strengthinflayer = np.sum(self.strengthinf * self.aq.eigvec[self.pylayer,:,:], 1) 
@@ -792,7 +793,7 @@ def xsection(ml,x1=0,x2=1,y1=0,y2=0,N=100,t=1,layer=1,color=None,lw=1,newfig=Tru
                 
 def timcontour( ml, xmin, xmax, nx, ymin, ymax, ny, levels = 10, t=0.0, layer = 1,\
                color = 'k', lw = 0.5, style = 'solid',layout = True, newfig = True, \
-               labels = False, labelfmt = '%1.2f', separate = True, sendback = False):
+               labels = False, labelfmt = '%1.2f'):
     '''Contour heads with pylab'''
     print 'grid of '+str((nx,ny))+'. gridding in progress. hit ctrl-c to abort'
     h = ml.headgrid(xmin,xmax,nx,ymin,ymax,ny,t,layer)  # h[Nlayers,Ntimes,Ny,Nx]

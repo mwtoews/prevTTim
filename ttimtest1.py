@@ -1,5 +1,5 @@
 from pylab import *
-from ttim import *
+from ttim_ok_dec_16 import *
 
 ml = ModelMaq(kaq=[1.0,5.0],z=[3,2,1,0],c=[10.],Saq=[0.3,0.01],Sll=[0.001],tmin=0.001,tmax=1000000.0,M=20)
 #w1 = InternalStorageWell(ml,0.,0.,.1,1,[1])
