@@ -34,6 +34,9 @@ setup (name = "ttim",
 # This trick might be original; I haven't found it anywhere.
 # The precompiled Fortran library is passed as a data file,
 # so that dist does not try and recompile on the destination machine
-       data_files = [(sys.prefix+'/lib/python2.'+str(pyver)+'/site-packages/ttim',["bessel.so","invlap.so"])]
+       data_files = [(sys.prefix+'/lib/python2.'+str(pyver)+'/site-packages/ttim',["bessel.so","invlap.so",
+                      "x0y0.fth","x1y0.fth","x5y0.fth","x10y0.fth",
+                      "CCrack.dat","NCrack.dat","SCrack.dat","Crackxst10.dat",
+                      "ttimtest1new.py","ttimtest2new.py","ttimtest3new.py","ttimtest4new.py","neuman.png"])]
 #	   ext_modules= [Extension("besselaes",["besselaes.f90","trianglemodule.c"])]
 	   )

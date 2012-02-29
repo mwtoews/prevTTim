@@ -2,9 +2,16 @@ from pylab import *
 import matplotlib.image as mpimg
 from ttim2 import *
 
+######################################################
+# Neuman figure read from neuman.png in ttim directory
+###################################################
+
+from ttim2 import __file__ as ttimdir
+ttimdir = ttimdir[:-len('ttim2.pyc')]
+
 # Figure
 plt.figure()
-img = mpimg.imread('neuman.png')
+img = mpimg.imread(ttimdir+'neuman.png')
 ax = plt.imshow(np.flipud(img),origin='lower',extent=(-1,5,-2,1))
 ax = ax.get_axes()
 plt.draw()

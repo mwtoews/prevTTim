@@ -9,8 +9,11 @@ ml.solve()
 
 ######################################################
 # following lines create figures in manual, Modflow 
-# output read from data files *.dat
+# output read from data files *.dat in ttim directory
 ###################################################
+
+from ttim2 import __file__ as ttimdir
+ttimdir = ttimdir[:-len('ttim2.pyc')]
 
 t = 10**linspace(-2,1.69897000434,100)
 
@@ -18,7 +21,7 @@ figure(figsize=(14,10))
 
 subplot(221)
 h = ml.head(-5,4.9,t)
-ncrack=loadtxt('NCrack.dat')
+ncrack=loadtxt(ttimdir+'NCrack.dat')
 semilogx(t,h[0], 'b')
 semilogx(t,h[1], 'g')
 semilogx(ncrack[:,0], ncrack[:,1]-3.,'b+')
@@ -33,7 +36,7 @@ t = 10**linspace(-2,1.69897000434,100)
 
 subplot(222)
 h = ml.head(-5,0,t)
-ccrack=loadtxt('CCrack.dat')
+ccrack=loadtxt(ttimdir+'CCrack.dat')
 semilogx(t,h[0], 'b')
 semilogx(t,h[1], 'g')
 semilogx(ccrack[:,0], ccrack[:,1]-3.,'b+')
@@ -48,7 +51,7 @@ t = 10**linspace(-2,1.69897000434,100)
 
 subplot(223)
 h = ml.head(-5,-4.9,t)
-scrack=loadtxt('SCrack.dat')
+scrack=loadtxt(ttimdir+'SCrack.dat')
 semilogx(t,h[0], 'b')
 semilogx(t,h[1], 'g')
 semilogx(scrack[:,0], scrack[:,1]-3.,'b+')
@@ -60,7 +63,7 @@ title('south end of crack')
 show()
 
 subplot(224)
-crackxs=loadtxt('Crackxst10.dat')
+crackxs=loadtxt(ttimdir+'Crackxst10.dat')
 #xsection(ml, -10.0, 10.0, 0, 0, 201., 9.69, [1,2])
 xsection(ml, -10.0, 10.0, 0, 0, 201., 10, [1,2], newfig=False)
 plot(crackxs[:,0]-90., crackxs[:,1]-3.,'b+')

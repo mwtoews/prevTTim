@@ -8,11 +8,14 @@ ml.solve()
 
 ############################################
 # following lines create figures in manual, 
-# MLU output read in from data files *.fth
+# MLU output read in from data files *.fth in ttim directory
 ############################################
+from ttim2 import __file__ as ttimdir
+ttimdir = ttimdir[:-len('ttim2.pyc')]
+
 t0 = logspace(-3,4,50)
 h0 = ml.head(.2,0,t0)
-r0=loadtxt('x0y0.fth')
+r0=loadtxt(ttimdir+'x0y0.fth')
 
 figure(figsize=(14,10))
 
@@ -29,7 +32,7 @@ show()
 
 t1 = 10**linspace(-2,5,50)
 h1 = ml.head(1,0,t1)
-r1=loadtxt('x1y0.fth')
+r1=loadtxt(ttimdir+'x1y0.fth')
 
 subplot(222)
 semilogx(t1,-h1[0],'b+')
@@ -44,7 +47,7 @@ show()
 
 t5 = 10**linspace(-1,6,50)
 h5 = ml.head(5,0,t5)
-r5=loadtxt('x5y0.fth')
+r5=loadtxt(ttimdir+'x5y0.fth')
 
 subplot(223)
 semilogx(t5,-h5[0],'b+')
@@ -59,7 +62,7 @@ show()
  
 t10 = 10**linspace(-1,6,50)
 h10 = ml.head(10,0,t10)
-r10=loadtxt('x10y0.fth')
+r10=loadtxt(ttimdir+'x10y0.fth')
 
 subplot(224)
 semilogx(t10,-h10[0],'b+')

@@ -241,7 +241,7 @@ class TimModel:
         f.close()
         
 class ModelMaq(TimModel):
-    def __init__(self,kaq=[1],z=[1,0],c=[],Saq=[],Sll=[],topboundary='imp',phreatictop=False,tmin=1,tmax=10,M=15):
+    def __init__(self,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[],topboundary='imp',phreatictop=False,tmin=1,tmax=10,M=15):
         self.storeinput(inspect.currentframe())
         kaq = np.atleast_1d(kaq).astype('d')
         Naq = len(kaq)
@@ -368,7 +368,7 @@ class Aquifer:
         return w,v
 
 class Element:
-    def __init__(self, model, Nparam=1, Nunknowns=0, layer=1, tsandbc=[(0.0,0.0)], type='z', name='', label=None):
+    def __init__(self, model, Nparam=1, Nunknowns=0, layer=1, tsandbc=[(0.0,0.0)], type='z', name='', label=None, parent=None):
         '''Types of elements
         'v': boundary condition is variable through time
         'z': boundary condition is zero through time
@@ -392,6 +392,10 @@ class Element:
         self.name = name
         self.label = label
         if self.label is not None: assert self.label not in self.model.elementDict.keys(), "TTim error: label "+self.label+" already exists"
+        if parent is None:
+            self.parent = self
+        else:
+            self.parent = parent
         self.Rzero = 20.0
     def setbc(self):
         if len(self.tstart) > 1:
@@ -447,7 +451,6 @@ class Element:
         time = np.atleast_1d(t).copy()
         rv = np.zeros((self.Nlayer,len(time)))
         if self.type == 'g':
-            #s = np.sum(self.strengthinf * self.aq.eigvec, 1) * self.model.p ** derivative
             s = self.strengthinflayer * self.model.p ** derivative
             for itime in range(self.Ntstart):
                 t = time - self.tstart[itime]
@@ -503,8 +506,8 @@ class HeadEquation:
                 ieq += e.Nunknowns
         for i in range(self.model.Ngbc):
             rhs[:,i,:] -= self.model.gbcList[i].unitpotentiallayer(self.xc,self.yc,self.pylayer)  # Pretty cool that this works, really
-        if self.type == 'v':
-            iself = self.model.vbcList.index(self)
+        if self.parent.type == 'v':
+            iself = self.model.vbcList.index(self.parent)
             for i in range(self.Nunknowns):
                 rhs[i,self.model.Ngbc+iself,:] = self.pc[i] / self.model.p
         return mat, rhs
@@ -556,7 +559,6 @@ class WellBase(Element):
         laboverrwk1 = self.aq.lab / (self.rw * kv(1,self.rw/self.aq.lab))
         self.setflowcoef()
         self.term = -1.0 / (2*np.pi) * laboverrwk1 * self.flowcoef * coef  # shape (self.Nparam,self.aq.Naq,self.model.Np)
-#        self.term = -1.0 / (2*np.pi) * self.flowcoef * coef  # shape (self.Nparam,self.aq.Naq,self.model.Np)
         self.term2 = self.term.reshape(self.Nparam,self.aq.Naq,self.model.Nin,self.model.Npin)
         self.strengthinf = self.flowcoef * coef
         self.strengthinflayer = np.sum(self.strengthinf * self.aq.eigvec[self.pylayer,:,:], 1) 
@@ -587,8 +589,8 @@ class WellBase(Element):
 
 class LineSinkBase(Element):
     '''LineSink Base Class. All LineSink elements are derived from this class'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandbc=[(0.0,1.0)],res=0.0,layer=1,type='',name='LineSinkBase',label=None,addtomodel=True):
-        Element.__init__(self, model, Nparam=1, Nunknowns=0, layer=layer, tsandbc=tsandbc, type=type, name=name, label=label)
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandbc=[(0.0,1.0)],res=0.0,layer=1,type='',name='LineSinkBase',label=None,addtomodel=True,parent=None):
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layer=layer, tsandbc=tsandbc, type=type, name=name, label=label, parent=parent)
         self.Nparam = len(self.pylayer)
         self.x1 = float(x1); self.y1 = float(y1); self.x2 = float(x2); self.y2 = float(y2); self.res = res
         if addtomodel: self.model.addElement(self)
@@ -598,6 +600,7 @@ class LineSinkBase(Element):
     def initialize(self):
         self.xc = 0.5*(self.x1+self.x2); self.yc = 0.5*(self.y1+self.y2)
         self.z1 = self.x1 + 1j*self.y1; self.z2 = self.x2 + 1j*self.y2
+        self.L = np.abs(self.z1-self.z2)
         self.aq = self.model.aq.findAquiferData(self.xc,self.yc)
         self.setbc()
         coef = self.aq.coef[self.pylayer,:]
@@ -625,6 +628,8 @@ class LineSinkBase(Element):
                         rv[:,i,j,:] = self.term2[:,i,j,:] * pot
         rv.shape = (self.Nparam,aq.Naq,self.model.Np)
         return rv
+    def strength(self,t,derivative=0):
+        return Element.strength(self,t,derivative) * self.L
     def headinside(self,t):
         return self.model.head(self.xc,self.yc,t)[self.pylayer] - self.resfac[:,np.newaxis] / self.aq.Tcol[self.pylayer] * self.strength(t)
     def layout(self):
@@ -758,16 +763,16 @@ class HeadWell(WellBase,HeadEquation):
         
 class HeadLineSink(LineSinkBase,HeadEquation):
     '''HeadLineSink of which the head varies through time. May be screened in multiple layers but all with the same head'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandh=[(0.0,1.0)],res=0.0,layer=1,label=None):
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandh=[(0.0,1.0)],res=0.0,layer=1,label=None,addtomodel=True,parent=None):
         self.storeinput(inspect.currentframe())
-        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandh,res=res,layer=layer,type='v',name='HeadLineSink',label=label,addtomodel=True)
+        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandh,res=res,layer=layer,type='v',name='HeadLineSink',label=label,addtomodel=addtomodel,parent=parent)
         self.Nunknowns = self.Nparam
     def initialize(self):
         LineSinkBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
         self.pc = self.aq.T[self.pylayer] # Needed in solving; We solve for a unit head
         
-def HeadLineSinkString(model,xy=[(-1,0),(1,0)],tsandh=[(0.0,1.0)],res=0.0,layer=1):
+def HeadLineSinkStringOld(model,xy=[(-1,0),(1,0)],tsandh=[(0.0,1.0)],res=0.0,layer=1):
     # Helper function to create string of line-sinks
     lslist = []
     xy = np.atleast_2d(xy)
@@ -775,6 +780,61 @@ def HeadLineSinkString(model,xy=[(-1,0),(1,0)],tsandh=[(0.0,1.0)],res=0.0,layer=
         ls = HeadLineSink(model,xy[i,0],xy[i,1],xy[i+1,0],xy[i+1,1],tsandh,res,layer)
         lslist.append(ls)
     return lslist
+
+class HeadLineSinkString(Element):
+    def __init__(self,model,xy=[(-1,0),(1,0)],tsandh=[(0.0,1.0)],res=0.0,layer=1,label=None):
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layer=layer, tsandbc=tsandh, type='v', name='HeadLineSinkString', label=label)
+        xy = np.atleast_2d(xy).astype('d')
+        self.x,self.y = xy[:,0], xy[:,1]
+        self.Nls = len(self.x) - 1
+        self.Nlayer = len(self.pylayer)
+        self.Nparam = self.Nlayer * self.Nls
+        self.Nunknowns = self.Nparam
+        self.L = np.sqrt( (self.x[1:]-self.x[:-1])**2 + (self.y[1:]-self.y[:-1])**2 )
+        self.lsList = []
+        for i in range(self.Nls):
+            self.lsList.append( HeadLineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],tsandh=tsandh,res=res,layer=layer,label=None,addtomodel=False,parent=self) )
+        self.model.addElement(self)
+    def __repr__(self):
+        return self.name + ' with nodes ' + str(zip(self.x,self.y))
+    def initialize(self):
+        for ls in self.lsList: ls.initialize()
+        self.aq = self.model.aq.findAquiferData(self.lsList[0].xc,self.lsList[0].yc)
+        self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
+        self.setbc()
+        self.strengthinf = np.zeros((self.Nparam,self.aq.Naq,self.model.Np),'D')
+        self.strengthinflayer = np.zeros((self.Nparam,self.model.Np),'D')
+        for i in range(self.Nls):
+            self.strengthinf[i*self.Nls:i*self.Nls+self.Nlayer,:] = self.lsList[i].strengthinf
+            self.strengthinflayer[i*self.Nls:i*self.Nls+self.Nlayer,:] = self.lsList[i].strengthinflayer
+    def potinf(self,x,y,aq=None):
+        '''Returns array (Nunknowns,Nperiods)'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rv = np.zeros((self.Nparam,aq.Naq,self.model.Np),'D')
+        for i in range(self.Nls):
+            rv[i*self.Nls:i*self.Nls+self.Nlayer,:] = self.lsList[i].potinf(x,y,aq)
+        return rv
+    def strength(self,t,derivative=0): # Added here as I need to multiply strength by L for each line-sink
+        time = np.atleast_1d(t).copy()
+        rv = np.zeros((self.Nlayer,len(time)))
+        # Ugly statement to make array of L values
+        L = np.ravel(self.L[:,np.newaxis]*np.ones(self.Nlayer))
+        paramtimesL = self.parameters * L[:,np.newaxis]
+        s = np.sum( paramtimesL[:,:,np.newaxis,:] * self.strengthinf, 1 )
+        s = np.sum( s[:,np.newaxis,:,:] * self.model.aq.eigvec, 2 ) * self.model.p ** derivative
+        for k in range(self.model.Ngvbc):
+            e = self.model.gvbcList[k]
+            for itime in range(e.Ntstart):
+                t = time - e.tstart[itime]
+                for i in self.pylayer:
+                    rv[i] += e.bc[itime] * self.model.inverseLapTran(s[k,i],t)
+        return rv
+    def equation(self):
+        mat = np.empty( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' )
+        rhs = np.empty( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )
+        for i in range(self.Nls):
+            mat[i*self.Nls:i*self.Nls+self.Nlayer,:],rhs[i*self.Nls:i*self.Nls+self.Nlayer,:] = self.lsList[i].equation() 
+        return mat, rhs
     
 def xsection(ml,x1=0,x2=1,y1=0,y2=0,N=100,t=1,layer=1,color=None,lw=1,newfig=True):
     if newfig: plt.figure()
@@ -842,6 +902,7 @@ def pylayout( ml, ax, color = 'k', lw = 0.5, style = '-' ):
 #ls2 = LineSink(ml,0,-5,10,10,tsandsig=[(0,.03),(2,.07)],layer=[1],label='mark2')
 ##ls3 = HeadLineSink(ml,-10,5,0,5,tsandh=[(0,0.02),(3,0.01)],res=0.0,layer=[1,2])
 #lss = HeadLineSinkString(ml,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=0.0,layer=[1,2])
+##lss = HeadLineSinkString(ml,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=0.0,layer=[1,2])
 ##ls3 = ZeroMscreenLineSink(ml,-10,5,0,5,res=1.0,layer=[1,2])
 ##tQ = np.array([
 ##    (0,5),
@@ -855,6 +916,13 @@ def pylayout( ml, ax, color = 'k', lw = 0.5, style = '-' ):
 #ml.solve()
 ##print ml.potential(2,3,[.5,5])
 #print ml.potential(50,50,[0.5,5])
+#
+#ml2 = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=0.1,tmax=10,M=15)
+#ls1a = LineSink(ml2,-10,-10,0,-5,tsandsig=[(0,.05),(1,.02)],res=1.0,layer=[1,2],label='mark1')
+#ls2a = LineSink(ml2,0,-5,10,10,tsandsig=[(0,.03),(2,.07)],layer=[1],label='mark2')
+#ls3a = HeadLineSinkStringOld(ml2,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=0.0,layer=[1,2])
+#ml2.solve()
+#print ml2.potential(50,50,[0.5,5])
 
 #print 'Q from strength:  ',w3.strength(.5)
 #print 'Q from head diff: ',(ml.head(w3.xc,w3.yc,.5)-w3.headinside(.5))/w3.res*2*np.pi*w3.rw*ml.aq.Haq[:,np.newaxis]
