@@ -2,16 +2,16 @@ from pylab import *
 from ttim2 import *
 
 ml = ModelMaq(kaq=[1.0,5.0],z=[3,2,1,0],c=[10.],Saq=[0.3,0.01],Sll=[0.001],tmin=0.001,tmax=1000000.0,M=15)
-#w1 = InternalStorageWell(ml,0.,0.,.1,1,[1])
-w1 = Well(ml,xw=0,yw=0,rw=1e-5,tsandQ=[(0,1)],layer=[1])
+w1 = Well(ml,xw=0,yw=0,rw=1e-5,tsandQ=[(0,1)],layers=[1])
 ml.solve()
 
 ############################################
 # following lines create figures in manual, 
 # MLU output read in from data files *.fth in ttim directory
 ############################################
-from ttim2 import __file__ as ttimdir
-ttimdir = ttimdir[:-len('ttim2.pyc')]
+
+import os
+ttimdir = os.path.dirname( os.path.abspath( __file__ ) ) + '/'  # abspath includes filename. just dirname doesn't work when you are in the directory
 
 t0 = logspace(-3,4,50)
 h0 = ml.head(.2,0,t0)
@@ -28,7 +28,6 @@ legend(('ttim, upper', 'ttim, lower', 'mlu, upper', 'mlu, lower'), loc=2)
 xlabel('time')
 ylabel('drawdown')
 title('r=0.2')
-show()
 
 t1 = 10**linspace(-2,5,50)
 h1 = ml.head(1,0,t1)
@@ -43,7 +42,6 @@ legend(('ttim, upper', 'ttim, lower', 'mlu, upper', 'mlu, lower'),loc=2)
 xlabel('time')
 ylabel('drawdown')
 title('r=1.0')
-show()
 
 t5 = 10**linspace(-1,6,50)
 h5 = ml.head(5,0,t5)
@@ -58,7 +56,6 @@ legend(('ttim, upper', 'ttim, lower', 'mlu, upper', 'mlu, lower'),loc=2)
 xlabel('time')
 ylabel('drawdown')
 title('r=5.0')
-show()
  
 t10 = 10**linspace(-1,6,50)
 h10 = ml.head(10,0,t10)

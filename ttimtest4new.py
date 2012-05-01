@@ -6,8 +6,8 @@ from ttim2 import *
 # Neuman figure read from neuman.png in ttim directory
 ###################################################
 
-from ttim2 import __file__ as ttimdir
-ttimdir = ttimdir[:-len('ttim2.pyc')]
+import os
+ttimdir = os.path.dirname( os.path.abspath( __file__ ) ) + '/'  # abspath includes filename. just dirname doesn't work when you are in the directory
 
 # Figure
 plt.figure()
@@ -31,11 +31,14 @@ for Ss in [1e-3,1e-4,1e-5,1e-6,1e-7]:
     t = ts * Saq * 10**2 / T
     #
     ml = Model3D(kaq,z,S,kzoverkh=1,phreatictop=True,tmin=t[0],tmax=t[-1],M=20)
-    w = Well(ml, xw=0, yw=0, rw=.1, tsandQ=[(0,1)], layer=range(2,12))
+    w = Well(ml, xw=0, yw=0, rw=.1, tsandQ=[(0,1)], layers=range(2,12))
     #
     ml.solve()
     h = ml.potential(10,0,t)
     h = -h*4*np.pi*T/10.0  # Make dimensionless
     plot(log10(ts),log10(h[-1]),'+')
+    
+xlabel('$Tt/(Sr^2)$',fontsize=14)
+ylabel('$4\pi Ts/Q$',fontsize=14)
 
 show()

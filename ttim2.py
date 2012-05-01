@@ -10,6 +10,7 @@ from invlap import *
 from scipy.special import kv # Needed for K1 in Well class
 from cmath import tanh as cmath_tanh
 import inspect # Used for storing the input
+import os
 
 class TimModel:
     def __init__(self,kaq=[1,1],Haq=[1,1],c=[np.nan,100],Saq=[0.3,0.003],Sll=[1e-3],topboundary='imp',tmin=1,tmax=10,M=15):
@@ -79,8 +80,8 @@ class TimModel:
         self.Np = len(self.p)
         self.Npin = 2 * self.M + 1
         self.aq.initialize()
-    def potential(self,x,y,t,pylayer=None,aq=None,derivative=0):
-        '''Returns pot[Naq,Ntimes] if layer=None, otherwise pot[len(pylayer,Ntimes)]
+    def potential(self,x,y,t,pylayers=None,aq=None,derivative=0):
+        '''Returns pot[Naq,Ntimes] if layers=None, otherwise pot[len(pylayers,Ntimes)]
         t must be ordered '''
         #
         if derivative > 0:
@@ -88,19 +89,19 @@ class TimModel:
             return
         #
         if aq is None: aq = self.aq.findAquiferData(x,y)
-        if pylayer is None: pylayer = range(aq.Naq)
-        Nlayer = len(pylayer)
+        if pylayers is None: pylayers = range(aq.Naq)
+        Nlayers = len(pylayers)
         time = np.atleast_1d(t).copy()
         pot = np.zeros((self.Ngvbc, aq.Naq, self.Np),'D')
         for i in range(self.Ngbc):
             pot[i,:] += self.gbcList[i].unitpotential(x,y,aq)
         for e in self.vzbcList:
             pot += e.potential(x,y,aq)
-        if pylayer is None:
+        if pylayers is None:
             pot = np.sum( pot[:,np.newaxis,:,:] * aq.eigvec, 2 )
         else:
-            pot = np.sum( pot[:,np.newaxis,:,:] * aq.eigvec[pylayer,:], 2 )
-        rv = np.zeros((Nlayer,len(time)))
+            pot = np.sum( pot[:,np.newaxis,:,:] * aq.eigvec[pylayers,:], 2 )
+        rv = np.zeros((Nlayers,len(time)))
         if (time[0] < self.tmin) or (time[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
         #
         for k in range(self.Ngvbc):
@@ -119,54 +120,54 @@ class TimModel:
                         #    tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
                         Nt = len(tp)
                         if Nt > 0:  # if all values zero, don't do the inverse transform
-                            for i in range(Nlayer):
+                            for i in range(Nlayers):
                                 # I used to check the first value only, but it seems that checking that nothing is zero is needed and should be sufficient
                                 #if np.abs( pot[k,i,n*self.Npin] ) > 1e-20:  # First value very small
                                 if not np.any( pot[k,i,n*self.Npin:(n+1)*self.Npin] == 0.0) : # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
                                     rv[i,it:it+Nt] += e.bc[itime] * invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[k,i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
                             it = it + Nt
         return rv
-    def head(self,x,y,t,layer=None,aq=None,derivative=0):
+    def head(self,x,y,t,layers=None,aq=None,derivative=0):
         if aq is None: aq = self.aq.findAquiferData(x,y)
-        if layer is None:
-            pylayer = range(aq.Naq)
+        if layers is None:
+            pylayers = range(aq.Naq)
         else:
-            pylayer = np.atleast_1d(layer) - 1
-        pot = self.potential(x,y,t,pylayer,aq,derivative)
-        return aq.potentialToHead(pot,pylayer)
+            pylayers = np.atleast_1d(layers) - 1
+        pot = self.potential(x,y,t,pylayers,aq,derivative)
+        return aq.potentialToHead(pot,pylayers)
     def headinside(self,elabel,t):
         return self.elementDict[elabel].headinside(t)
     def strength(self,elabel,t):
         return self.elementDict[elabel].strength(t)
-    def headalongline(self,x,y,t,layer=None):
-        '''Returns head[Nlayer,len(t),len(x)]
+    def headalongline(self,x,y,t,layers=None):
+        '''Returns head[Nlayers,len(t),len(x)]
         Assumes same number of layers for each x and y
         layers may be None or list of layers for which head is computed'''
         xg,yg = np.atleast_1d(x),np.atleast_1d(y)
-        if layer is None:
-            Nlayer = self.aq.findAquiferData(xg[0],yg[0]).Naq
+        if layers is None:
+            Nlayers = self.aq.findAquiferData(xg[0],yg[0]).Naq
         else:
-            Nlayer = len(np.atleast_1d(layer))
+            Nlayers = len(np.atleast_1d(layers))
         nx = len(xg)
         if len(yg) == 1:
             yg = yg * np.ones(nx)
         t = np.atleast_1d(t)
-        h = np.zeros( (Nlayer,len(t),nx) )
+        h = np.zeros( (Nlayers,len(t),nx) )
         for i in range(nx):
-            h[:,:,i] = self.head(xg[i],yg[i],t,layer)
+            h[:,:,i] = self.head(xg[i],yg[i],t,layers)
         return h
-    def headgrid(self,x1,x2,nx,y1,y2,ny,t,layer=None):
+    def headgrid(self,x1,x2,nx,y1,y2,ny,t,layers=None):
         '''Returns h[Nlayers,Ntimes,Ny,Nx]. If layers is None, all layers are returned'''
         xg,yg = np.linspace(x1,x2,nx), np.linspace(y1,y2,ny)
-        if layer is None:
-            Nlayer = self.aq.findAquiferData(xg[0],yg[0]).Naq
+        if layers is None:
+            Nlayers = self.aq.findAquiferData(xg[0],yg[0]).Naq
         else:
-            Nlayer = len(np.atleast_1d(layer))
+            Nlayers = len(np.atleast_1d(layers))
         t = np.atleast_1d(t)
-        h = np.empty( (Nlayer,len(t),ny,nx) )
+        h = np.empty( (Nlayers,len(t),ny,nx) )
         for j in range(ny):
             for i in range(nx):
-                h[:,:,j,i] = self.head(xg[i],yg[j],t,layer)
+                h[:,:,j,i] = self.head(xg[i],yg[j],t,layers)
         return h
     def inverseLapTran(self,pot,t):
         '''returns array of potentials of len(t)
@@ -206,8 +207,7 @@ class TimModel:
                 mat[ ieq:ieq+e.Nunknowns, :, : ], rhs[ ieq:ieq+e.Nunknowns, :, : ] = e.equation()
                 ieq += e.Nunknowns
         if printmat:
-            print 'mat ',mat
-            print 'rhs ',rhs
+            return mat,rhs
         for i in range( self.Np ):
             sol = np.linalg.solve( mat[:,:,i], rhs[:,:,i] )
             icount = 0
@@ -250,7 +250,7 @@ class ModelMaq(TimModel):
         Saq = np.atleast_1d(Saq).astype('d')
         Sll = np.atleast_1d(Sll).astype('d')
         H = z[:-1] - z[1:]
-        assert np.all(H >= 0), 'Error: Not all layer thicknesses are non-negative' + str(H) 
+        assert np.all(H >= 0), 'Error: Not all layers thicknesses are non-negative' + str(H) 
         if topboundary[:3] == 'imp':
             assert len(z) == 2*Naq, 'Error: Length of z needs to be ' + str(2*Naq)
             assert len(c) == Naq-1, 'Error: Length of c needs to be ' + str(Naq-1)
@@ -262,7 +262,7 @@ class ModelMaq(TimModel):
             Sll = Sll * H[1::2]
             c = np.hstack((np.nan,c))
             Sll = np.hstack((np.nan,Sll))
-        else: # leaky layer on top
+        else: # leaky layers on top
             assert len(z) == 2*Naq+1, 'Error: Length of z needs to be ' + str(2*Naq+1)
             assert len(c) == Naq, 'Error: Length of c needs to be ' + str(Naq)
             assert len(Saq) == Naq, 'Error: Length of Saq needs to be ' + str(Naq)
@@ -319,7 +319,7 @@ class Aquifer:
         lab2[Naq,Nin,Npin]: Array with lambda values reorganized per interval
         eigvec[Naq,Naq,Np]: Array with eigenvector matrices
         coef[Naq,Naq,Np]: Array with coefficients;
-        coef[ipylayer,:,np] are the coefficients if the element is in ipylayer belonging to Laplace parameter number np
+        coef[ipylayers,:,np] are the coefficients if the element is in ipylayers belonging to Laplace parameter number np
         '''
         self.eigval = np.zeros((self.Naq,self.model.Np),'D')
         self.lab = np.zeros((self.Naq,self.model.Np),'D')
@@ -336,10 +336,10 @@ class Aquifer:
         self.lab2 = self.lab.copy(); self.lab2.shape = (self.Naq,self.model.Nin,self.model.Npin)
     def findAquiferData(self,x,y):
         return self
-    def headToPotential(self,h,pylayer):
-        return h * self.Tcol[pylayer]
-    def potentialToHead(self,p,pylayer):
-        return p / self.Tcol[pylayer]
+    def headToPotential(self,h,pylayers):
+        return h * self.Tcol[pylayers]
+    def potentialToHead(self,p,pylayers):
+        return p / self.Tcol[pylayers]
     def compute_lab_eigvec(self,p):
         sqrtpSc = np.sqrt( p * self.Sll * self.c )
         a, b = np.zeros_like(sqrtpSc), np.zeros_like(sqrtpSc)
@@ -368,18 +368,24 @@ class Aquifer:
         return w,v
 
 class Element:
-    def __init__(self, model, Nparam=1, Nunknowns=0, layer=1, tsandbc=[(0.0,0.0)], type='z', name='', label=None, parent=None):
+    def __init__(self, model, Nparam=1, Nunknowns=0, layers=1, tsandbc=[(0.0,0.0)], type='z', name='', label=None):
         '''Types of elements
+        'g': strength is given through time
         'v': boundary condition is variable through time
         'z': boundary condition is zero through time
+        Definition of Nlayers, Ncp, Npar, Nunknowns:
+        Nlayers: Number of layers that the element is screened in, set in Element
+        Ncp: Number of control points along the element
+        Nparam: Number of parameters, commonly Nlayers * Ncp
+        Nunknowns: Number of unknown parameters, commonly zero or Npar
         '''
         self.model = model
         self.aq = None # Set in the initialization function
         self.Nparam = Nparam  # Number of parameters
         self.Nunknowns = Nunknowns
-        self.layer = np.atleast_1d(layer)
-        self.pylayer = self.layer - 1
-        self.Nlayer = len(self.layer)
+        self.layers = np.atleast_1d(layers)
+        self.pylayers = self.layers - 1
+        self.Nlayers = len(self.layers)
         #
         tsandbc = np.atleast_2d(tsandbc).astype('d')
         assert tsandbc.shape[1] == 2, "TTim input error: tsandQ or tsandh need to be 2D lists or arrays like [(0,1),(2,5),(8,0)] "
@@ -392,11 +398,7 @@ class Element:
         self.name = name
         self.label = label
         if self.label is not None: assert self.label not in self.model.elementDict.keys(), "TTim error: label "+self.label+" already exists"
-        if parent is None:
-            self.parent = self
-        else:
-            self.parent = parent
-        self.Rzero = 20.0
+        self.Rzero = 30.0
     def setbc(self):
         if len(self.tstart) > 1:
             self.bc = np.zeros_like(self.bcin)
@@ -423,47 +425,48 @@ class Element:
         if aq is None: aq = self.model.aq.findAquiferData(x,y)
         return np.sum( self.potinf(x,y,aq), 0 )
     # Functions used to build equations
-    def potinflayer(self,x,y,pylayer=0,aq=None):
-        '''pylayer can be scalar, list, or array. returns array of size (len(pylayer),Nparam,Np)
+    def potinflayers(self,x,y,pylayers=0,aq=None):
+        '''pylayers can be scalar, list, or array. returns array of size (len(pylayers),Nparam,Np)
         only used in building equations'''
         if aq is None: aq = self.model.aq.findAquiferData( x, y )
         pot = self.potinf(x,y,aq)
         rv = np.sum( pot[:,np.newaxis,:,:] * aq.eigvec, 2 )
         rv = rv.swapaxes(0,1) # As the first axes needs to be the number of layers
-        return rv[pylayer,:]
-    def potentiallayer(self,x,y,pylayer=0,aq=None):
-        '''Returns complex array of size (Ngvbc,len(pylayer),Np)
+        return rv[pylayers,:]
+    def potentiallayers(self,x,y,pylayers=0,aq=None):
+        '''Returns complex array of size (Ngvbc,len(pylayers),Np)
         only used in building equations'''
         if aq is None: aq = self.model.aq.findAquiferData(x,y)
         pot = self.potential(x,y,aq)
         phi = np.sum( pot[:,np.newaxis,:,:] * aq.eigvec, 2 )
-        return phi[:,pylayer,:]
-    def unitpotentiallayer(self,x,y,pylayer=0,aq=None):
-        '''Returns complex array of size (len(pylayer),Np)
+        return phi[:,pylayers,:]
+    def unitpotentiallayers(self,x,y,pylayers=0,aq=None):
+        '''Returns complex array of size (len(pylayers),Np)
         only used in building equations'''
         if aq is None: aq = self.model.aq.findAquiferData(x,y)
         pot = self.unitpotential(x,y,aq)
         phi = np.sum( pot[np.newaxis,:,:] * aq.eigvec, 1 )
-        return phi[pylayer,:]
+        return phi[pylayers,:]
     def strength(self,t,derivative=0):
-        '''returns array of strengths (Nlayer,len(t)) t must be ordered and tmin <= t <= tmax'''
+        '''returns array of strengths (Nlayers,len(t)) t must be ordered and tmin <= t <= tmax'''
         # Could potentially be more efficient if s is pre-computed for all elements, but I don't know if that is worthwhile to store as it is quick now
         time = np.atleast_1d(t).copy()
-        rv = np.zeros((self.Nlayer,len(time)))
+        rv = np.zeros((self.Nlayers,len(time)))
         if self.type == 'g':
-            s = self.strengthinflayer * self.model.p ** derivative
+            s = self.strengthinflayers * self.model.p ** derivative
             for itime in range(self.Ntstart):
                 t = time - self.tstart[itime]
-                for i in self.pylayer:
+                for i in range(self.Nlayers):
                     rv[i] += self.bc[itime] * self.model.inverseLapTran(s[i],t)
         else:
             s = np.sum( self.parameters[:,:,np.newaxis,:] * self.strengthinf, 1 )
-            s = np.sum( s[:,np.newaxis,:,:] * self.model.aq.eigvec, 2 ) * self.model.p ** derivative
+            s = np.sum( s[:,np.newaxis,:,:] * self.aq.eigvec, 2 )
+            s = s[:,self.pylayers,:]
             for k in range(self.model.Ngvbc):
                 e = self.model.gvbcList[k]
                 for itime in range(e.Ntstart):
                     t = time - e.tstart[itime]
-                    for i in self.pylayer:
+                    for i in range(self.Nlayers):
                         rv[i] += e.bc[itime] * self.model.inverseLapTran(s[k,i],t)
         return rv
     def headinside(self,t):
@@ -493,25 +496,27 @@ class HeadEquation:
         Returns rhs part Nunknowns,Nvbc,Np, complex
         Phi_out - c*T*q_s = Phi_in
         Well: q_s = Q / (2*pi*r_w*H)
-        LineSink: q_s = sigma / H
+        LineSink: q_s = sigma / H = Q / (L*H)
         '''
         mat = np.empty( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' )
         rhs = np.zeros( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )  # Needs to be initialized to zero
-        ieq = 0
-        for e in self.model.elementList:
-            if e.Nunknowns > 0:
-                mat[:,ieq:ieq+e.Nunknowns,:] = e.potinflayer(self.xc,self.yc,self.pylayer)
-                if e == self:
-                    for i in range(self.Nunknowns): mat[i,ieq+i,:] -= self.resfac[i] * e.strengthinflayer[i]
-                ieq += e.Nunknowns
-        for i in range(self.model.Ngbc):
-            rhs[:,i,:] -= self.model.gbcList[i].unitpotentiallayer(self.xc,self.yc,self.pylayer)  # Pretty cool that this works, really
-        if self.parent.type == 'v':
-            iself = self.model.vbcList.index(self.parent)
-            for i in range(self.Nunknowns):
-                rhs[i,self.model.Ngbc+iself,:] = self.pc[i] / self.model.p
+        for icp in range(self.Ncp):
+            istart = icp*self.Nlayers
+            ieq = 0  
+            for e in self.model.elementList:
+                if e.Nunknowns > 0:
+                    mat[istart:istart+self.Nlayers,ieq:ieq+e.Nunknowns,:] = e.potinflayers(self.xc[icp],self.yc[icp],self.pylayers)
+                    if e == self:
+                        for i in range(self.Nlayers): mat[istart+i,ieq+istart+i,:] -= self.resfac[istart+i] * e.strengthinflayers[istart+i]
+                    ieq += e.Nunknowns
+            for i in range(self.model.Ngbc):
+                rhs[istart:istart+self.Nlayers,i,:] -= self.model.gbcList[i].unitpotentiallayers(self.xc[icp],self.yc[icp],self.pylayers)  # Pretty cool that this works, really
+            if self.type == 'v':
+                iself = self.model.vbcList.index(self)
+                for i in range(self.Nlayers):
+                    rhs[istart+i,self.model.Ngbc+iself,:] = self.pc[istart+i] / self.model.p
         return mat, rhs
-    
+
 class MscreenEquation:
     def equation(self):
         '''Mix-in class that returns matrix rows for multi-scren conditions where total discharge is specified.
@@ -519,50 +524,53 @@ class MscreenEquation:
         Returns matrix part Nunknowns,Neq,Np, complex
         Returns rhs part Nunknowns,Nvbc,Np, complex
         head_out - c*q_s = h_in
-        Require h_i - h_(i+1) = 0
-        Sum Q_i = Q'''
+        Set h_i - h_(i+1) = 0 and Sum Q_i = Q'''
         mat = np.zeros( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' )  # Needs to be zero for last equation, but I think setting the whole array is quicker
         rhs = np.zeros( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )  # Needs to be initialized to zero
         ieq = 0
-        for e in self.model.elementList:
-            if e.Nunknowns > 0:
-                head = e.potinflayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis,np.newaxis]  # T[self.pylayer,np.newaxis,np.newaxis] is not allowed
-                mat[:-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:] - head[1:,:]
-                if e == self:
-                    for i in range(self.Nunknowns-1):
-                        mat[i,ieq+i,:] -= self.resfac[i] * e.strengthinflayer[i] / self.aq.T[self.pylayer[i]]  # As equation is in form of heads
-                        mat[i,ieq+i+1,:] += self.resfac[i+1] * e.strengthinflayer[i+1] / self.aq.T[self.pylayer[i+1]]
-                    mat[-1,ieq:ieq+e.Nunknowns,:] = 1.0
-                ieq += e.Nunknowns
-        for i in range(self.model.Ngbc):
-            head = self.model.gbcList[i].unitpotentiallayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis]
-            rhs[:-1,i,:] -= head[:-1,:] - head[1:,:]
-        if self.type == 'v':
-            iself = self.model.vbcList.index(self)
-            rhs[-1,self.model.Ngbc+iself,:] = 1.0  # If self.type == 'z', it should sum to zero, which is the default value of rhs
+        for icp in range(self.Ncp):
+            istart = icp*self.Nlayers
+            ieq = 0 
+            for e in self.model.elementList:
+                if e.Nunknowns > 0:
+                    head = e.potinflayers(self.xc[icp],self.yc[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis,np.newaxis]  # T[self.pylayers,np.newaxis,np.newaxis] is not allowed
+                    mat[istart:istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:] - head[1:,:]
+                    if e == self:
+                        for i in range(self.Nlayers-1):
+                            mat[istart+i,ieq+istart+i,:] -= self.resfac[istart+i] * e.strengthinflayers[istart+i] / self.aq.T[self.pylayers[i]]  # As equation is in form of heads
+                            mat[istart+i,ieq+istart+i+1,:] += self.resfac[istart+i+1] * e.strengthinflayers[istart+i+1] / self.aq.T[self.pylayers[i+1]]
+                        mat[istart+self.Nlayers-1,ieq+istart:ieq+istart+self.Nlayers,:] = 1.0
+                    ieq += e.Nunknowns
+            for i in range(self.model.Ngbc):
+                head = self.model.gbcList[i].unitpotentiallayers(self.xc[icp],self.yc[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis]
+                rhs[istart:istart+self.Nlayers-1,i,:] -= head[:-1,:] - head[1:,:]
+            if self.type == 'v':
+                iself = self.model.vbcList.index(self)
+                rhs[istart+self.Nlayers-1,self.model.Ngbc+iself,:] = 1.0  # If self.type == 'z', it should sum to zero, which is the default value of rhs
         return mat, rhs
     
 class WellBase(Element):
     '''Well Base Class. All Well elements are derived from this class'''
-    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandbc=[(0.0,1.0)],res=0.0,layer=1,type='',name='WellBase',label=None):
-        Element.__init__(self, model, Nparam=1, Nunknowns=0, layer=layer, tsandbc=tsandbc, type=type, name=name, label=label)
-        self.Nparam = len(self.pylayer)  # Defined here and not in Element as other elements can have multiple parameters per layer
+    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandbc=[(0.0,1.0)],res=0.0,layers=1,type='',name='WellBase',label=None):
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layers=layers, tsandbc=tsandbc, type=type, name=name, label=label)
+        self.Nparam = len(self.pylayers)  # Defined here and not in Element as other elements can have multiple parameters per layers
         self.xw = float(xw); self.yw = float(yw); self.rw = float(rw); self.res = res
         self.model.addElement(self)
     def __repr__(self):
         return self.name + ' at ' + str((self.xw,self.yw))
     def initialize(self):
-        self.xc = self.xw + self.rw; self.yc = self.yw # Control point to make sure the point is always the same for all elements
+        self.xc = np.array([self.xw + self.rw]); self.yc = np.array([self.yw]) # Control point to make sure the point is always the same for all elements
+        self.Ncp = 1
         self.aq = self.model.aq.findAquiferData(self.xw,self.yw)
         self.setbc()
-        coef = self.aq.coef[self.pylayer,:]
+        coef = self.aq.coef[self.pylayers,:]
         laboverrwk1 = self.aq.lab / (self.rw * kv(1,self.rw/self.aq.lab))
         self.setflowcoef()
         self.term = -1.0 / (2*np.pi) * laboverrwk1 * self.flowcoef * coef  # shape (self.Nparam,self.aq.Naq,self.model.Np)
         self.term2 = self.term.reshape(self.Nparam,self.aq.Naq,self.model.Nin,self.model.Npin)
         self.strengthinf = self.flowcoef * coef
-        self.strengthinflayer = np.sum(self.strengthinf * self.aq.eigvec[self.pylayer,:,:], 1) 
-        self.resfac = self.res * self.aq.T[self.pylayer] / ( 2*np.pi*self.rw*self.aq.Haq[self.pylayer] )
+        self.strengthinflayers = np.sum(self.strengthinf * self.aq.eigvec[self.pylayers,:,:], 1) 
+        self.resfac = self.res * self.aq.T[self.pylayers] / ( 2*np.pi*self.rw*self.aq.Haq[self.pylayers] )
     def setflowcoef(self):
         '''Separate function so that this can be overloaded for other types'''
         self.flowcoef = 1.0 / self.model.p  # Step function
@@ -583,33 +591,34 @@ class WellBase(Element):
         return rv
     def headinside(self,t):
         '''Returns head inside the well for the layers that the well is screened in'''
-        return self.model.head(self.xc,self.yc,t)[self.pylayer] - self.resfac[:,np.newaxis] / self.aq.Tcol[self.pylayer] * self.strength(t)
+        return self.model.head(self.xc,self.yc,t)[self.pylayers] - self.resfac[:,np.newaxis] / self.aq.Tcol[self.pylayers] * self.strength(t)
     def layout(self):
         return 'point',self.xw,self.yw
 
 class LineSinkBase(Element):
     '''LineSink Base Class. All LineSink elements are derived from this class'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandbc=[(0.0,1.0)],res=0.0,layer=1,type='',name='LineSinkBase',label=None,addtomodel=True,parent=None):
-        Element.__init__(self, model, Nparam=1, Nunknowns=0, layer=layer, tsandbc=tsandbc, type=type, name=name, label=label, parent=parent)
-        self.Nparam = len(self.pylayer)
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandbc=[(0.0,1.0)],res=0.0,layers=1,type='',name='LineSinkBase',label=None,addtomodel=True):
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layers=layers, tsandbc=tsandbc, type=type, name=name, label=label)
+        self.Nparam = len(self.pylayers)
         self.x1 = float(x1); self.y1 = float(y1); self.x2 = float(x2); self.y2 = float(y2); self.res = res
         if addtomodel: self.model.addElement(self)
         self.xa,self.ya,self.xb,self.yb,self.np = np.zeros(1),np.zeros(1),np.zeros(1),np.zeros(1),np.zeros(1,'i')  # needed to call bessel.circle_line_intersection
     def __repr__(self):
         return self.name + ' from ' + str((self.x1,self.y1)) +' to '+str((self.x2,self.y2))
     def initialize(self):
-        self.xc = 0.5*(self.x1+self.x2); self.yc = 0.5*(self.y1+self.y2)
+        self.xc = np.array([0.5*(self.x1+self.x2)]); self.yc = np.array([0.5*(self.y1+self.y2)])
+        self.Ncp = 1
         self.z1 = self.x1 + 1j*self.y1; self.z2 = self.x2 + 1j*self.y2
         self.L = np.abs(self.z1-self.z2)
         self.aq = self.model.aq.findAquiferData(self.xc,self.yc)
         self.setbc()
-        coef = self.aq.coef[self.pylayer,:]
+        coef = self.aq.coef[self.pylayers,:]
         self.setflowcoef()
         self.term = self.flowcoef * coef  # shape (self.Nparam,self.aq.Naq,self.model.Np)
         self.term2 = self.term.reshape(self.Nparam,self.aq.Naq,self.model.Nin,self.model.Npin)
         self.strengthinf = self.flowcoef * coef
-        self.strengthinflayer = np.sum(self.strengthinf * self.aq.eigvec[self.pylayer,:,:], 1)
-        self.resfac = self.res * self.aq.T[self.pylayer] / self.aq.Haq[self.pylayer]
+        self.strengthinflayers = np.sum(self.strengthinf * self.aq.eigvec[self.pylayers,:,:], 1)
+        self.resfac = self.res * self.aq.T[self.pylayers] / (self.aq.Haq[self.pylayers] * self.L)
     def setflowcoef(self):
         '''Separate function so that this can be overloaded for other types'''
         self.flowcoef = 1.0 / self.model.p  # Step function
@@ -621,47 +630,36 @@ class LineSinkBase(Element):
             pot = np.zeros(self.model.Npin,'D')
             for i in range(self.aq.Naq):
                 for j in range(self.model.Nin):
-                    bessel.circle_line_intersection(self.z1,self.z2,x+y*1j,20.0*abs(self.model.aq.lab2[i,j,0]),self.xa,self.ya,self.xb,self.yb,self.np)
+                    bessel.circle_line_intersection(self.z1,self.z2,x+y*1j,self.Rzero*abs(self.model.aq.lab2[i,j,0]),self.xa,self.ya,self.xb,self.yb,self.np)
                     if self.np > 0:
                         za = complex(self.xa,self.ya); zb = complex(self.xb,self.yb) # f2py has problem returning complex arrays -> fixed in new numpy
                         bessel.bessellsv(x,y,za,zb,self.aq.lab2[i,j,:],pot)
-                        rv[:,i,j,:] = self.term2[:,i,j,:] * pot
+                        rv[:,i,j,:] = self.term2[:,i,j,:] * pot / self.L  # Divide by L as the parameter is now total discharge
         rv.shape = (self.Nparam,aq.Naq,self.model.Np)
         return rv
-    def strength(self,t,derivative=0):
-        return Element.strength(self,t,derivative) * self.L
     def headinside(self,t):
-        return self.model.head(self.xc,self.yc,t)[self.pylayer] - self.resfac[:,np.newaxis] / self.aq.Tcol[self.pylayer] * self.strength(t)
+        return self.model.head(self.xc,self.yc,t)[self.pylayers] - self.resfac[:,np.newaxis] / self.aq.Tcol[self.pylayers] * self.strength(t)
     def layout(self):
         return 'line', [self.x1,self.x2], [self.y1,self.y2]
     
 class Well(WellBase):
     '''Well with non-zero and potentially variable discharge through time'''
-    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layer=1,label=None):
+    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layers=1,label=None):
         self.storeinput(inspect.currentframe())
-        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layer=layer,type='g',name='Well',label=label)
+        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layers=layers,type='g',name='Well',label=label)
         
 class LineSink(LineSinkBase):
     '''LineSink with non-zero and potentially variable discharge through time'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandsig=[(0.0,1.0)],res=0.0,layer=1,label=None):
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandQ=[(0.0,1.0)],res=0.0,layers=1,label=None,addtomodel=True):
         self.storeinput(inspect.currentframe())
-        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandsig,res=res,layer=layer,type='g',name='LineSink',label=label,addtomodel=True)
-
-def LineSinkString(model,xy=[(-1,0),(1,0)],tsandsig=[(0.0,1.0)],res=0.0,layer=1):
-    # Helper function to create string of line-sinks
-    lslist = []
-    xy = np.atleast_2d(xy)
-    for i in range(len(xy)-1):
-        ls = LineSink(model,xy[i,0],xy[i,1],xy[i+1,0],xy[i+1,1],tsandsig,res,layer)
-        lslist.append(ls)
-    return lslist
+        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandQ,res=res,layers=layers,type='g',name='LineSink',label=label,addtomodel=addtomodel)
 
 class ZeroMscreenWell(WellBase,MscreenEquation):
     '''MscreenWell with zero discharge. Needs to be screened in multiple layers; Head is same in all screened layers'''
-    def __init__(self,model,xw=0,yw=0,rw=0.1,res=0.0,layer=[1,2],label=None):
-        assert len(layer) > 1, "TTim input error: number of layers for ZeroMscreenWell must be at least 2"
+    def __init__(self,model,xw=0,yw=0,rw=0.1,res=0.0,layers=[1,2],label=None):
+        assert len(layers) > 1, "TTim input error: number of layers for ZeroMscreenWell must be at least 2"
         self.storeinput(inspect.currentframe())
-        WellBase.__init__(self,model,xw,yw,rw,tsandbc=[(0.0,0.0)],res=res,layer=layer,type='z',name='ZeroMscreenWell',label=label)
+        WellBase.__init__(self,model,xw,yw,rw,tsandbc=[(0.0,0.0)],res=res,layers=layers,type='z',name='ZeroMscreenWell',label=label)
         self.Nunknowns = self.Nparam
     def initialize(self):
         WellBase.initialize(self)
@@ -669,181 +667,163 @@ class ZeroMscreenWell(WellBase,MscreenEquation):
         
 class ZeroMscreenLineSink(LineSinkBase,MscreenEquation):
     '''MscreenLineSink with zero discharge. Needs to be screened in multiple layers; Head is same in all screened layers'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,res=0.0,layer=[1,2],label=None):
-        assert len(layer) > 1, "TTim input error: number of layers for ZeroMscreenLineSink must be at least 2"
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,res=0.0,layers=[1,2],label=None,addtomodel=True):
+        assert len(layers) > 1, "TTim input error: number of layers for ZeroMscreenLineSink must be at least 2"
         self.storeinput(inspect.currentframe())
-        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=[(0.0,0.0)],res=res,layer=layer,type='z',name='ZeroMscreenLineSink',label=label,addtomodel=True)
+        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=[(0.0,0.0)],res=res,layers=layers,type='z',name='ZeroMscreenLineSink',label=label,addtomodel=addtomodel)
         self.Nunknowns = self.Nparam
     def initialize(self):
         LineSinkBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
         
-def ZeroMscreenLineSinkString(model,xy=[(-1,0),(1,0)],res=0.0,layer=1):
-    # Helper function to create string of line-sinks
-    lslist = []
-    xy = np.atleast_2d(xy)
-    for i in range(len(xy)-1):
-        ls = ZeroMscreenLineSink(model,xy[i,0],xy[i,1],xy[i+1,0],xy[i+1,1],res,layer)
-        lslist.append(ls)
-    return lslist
-        
 class MscreenWell(WellBase,MscreenEquation):
     '''MscreenWell that varies through time. May be screened in multiple layers but heads are same in all screened layers'''
-    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layer=[1,2],label=None):
-        assert len(layer) > 1, "TTim input error: number of layers for MscreenWell must be at least 2"
+    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layers=[1,2],label=None):
+        assert len(layers) > 1, "TTim input error: number of layers for MscreenWell must be at least 2"
         self.storeinput(inspect.currentframe())
-        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layer=layer,type='v',name='MscreenWell',label=label)
+        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layers=layers,type='v',name='MscreenWell',label=label)
         self.Nunknowns = self.Nparam
-        self.xc = self.xw + self.rw; self.yc = self.yw # To make sure the point is always the same for all elements
     def initialize(self):
         WellBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
         
 class MscreenLineSink(LineSinkBase,MscreenEquation):
     '''MscreenLineSink that varies through time. Must be screened in multiple layers but heads are same in all screened layers'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandsig=[(0.0,1.0)],res=0.0,layer=[1,2],label=None):
-        assert len(layer) > 1, "TTim input error: number of layers for MscreenLineSink must be at least 2"
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandQ=[(0.0,1.0)],res=0.0,layers=[1,2],label=None,addtomodel=True):
+        assert len(layers) > 1, "TTim input error: number of layers for MscreenLineSink must be at least 2"
         self.storeinput(inspect.currentframe())
-        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandsig,res=res,layer=layer,type='v',name='MscreenLineSink',label=label,addtomodel=True)
+        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandQ,res=res,layers=layers,type='v',name='MscreenLineSink',label=label,addtomodel=addtomodel)
         self.Nunknowns = self.Nparam
     def initialize(self):
         LineSinkBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
         
-def MscreenLineSinkString(model,xy=[(-1,0),(1,0)],tsandsig=[(0.0,1.0)],res=0.0,layer=1):
-    # Helper function to create string of line-sinks
-    lslist = []
-    xy = np.atleast_2d(xy)
-    for i in range(len(xy)-1):
-        ls = MscreenLineSink(model,xy[i,0],xy[i,1],xy[i+1,0],xy[i+1,1],tsandsig,res,layer)
-        lslist.append(ls)
-    return lslist
-        
 class ZeroHeadWell(WellBase,HeadEquation):
     '''HeadWell that remains zero and constant through time'''
-    def __init__(self,model,xw=0,yw=0,rw=0.1,res=0.0,layer=1,label=None):
+    def __init__(self,model,xw=0,yw=0,rw=0.1,res=0.0,layers=1,label=None):
         self.storeinput(inspect.currentframe())
-        WellBase.__init__(self,model,xw,yw,rw,tsandbc=[(0.0,0.0)],res=res,layer=layer,type='z',name='ZeroHeadWell',label=label)
+        WellBase.__init__(self,model,xw,yw,rw,tsandbc=[(0.0,0.0)],res=res,layers=layers,type='z',name='ZeroHeadWell',label=label)
         self.Nunknowns = self.Nparam
-        self.xc = self.xw + self.rw; self.yc = self.yw # To make sure the point is always the same for all elements
     def initialize(self):
         WellBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
         
 class ZeroHeadLineSink(LineSinkBase,HeadEquation):
     '''HeadLineSink that remains zero and constant through time'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,res=0.0,layer=1,label=None):
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,res=0.0,layers=1,label=None,addtomodel=True):
         self.storeinput(inspect.currentframe())
-        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=[(0.0,0.0)],res=res,layer=layer,type='z',name='ZeroHeadLineSink',label=label,addtomodel=True)
+        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=[(0.0,0.0)],res=res,layers=layers,type='z',name='ZeroHeadLineSink',label=label,addtomodel=addtomodel)
         self.Nunknowns = self.Nparam
     def initialize(self):
         LineSinkBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
-        
-def ZeroHeadLineSinkString(model,xy=[(-1,0),(1,0)],res=0.0,layer=1):
-    # Helper function to create string of line-sinks
-    lslist = []
-    xy = np.atleast_2d(xy)
-    for i in range(len(xy)-1):
-        ls = ZeroHeadLineSink(model,xy[i,0],xy[i,1],xy[i+1,0],xy[i+1,1],res,layer)
-        lslist.append(ls)
-    return lslist
     
 class HeadWell(WellBase,HeadEquation):
     '''HeadWell of which the head varies through time. May be screened in multiple layers but all with the same head'''
-    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandh=[(0.0,1.0)],res=0.0,layer=1,label=None):
+    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandh=[(0.0,1.0)],res=0.0,layers=1,label=None):
         self.storeinput(inspect.currentframe())
-        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandh,res=res,layer=layer,type='v',name='HeadWell',label=label)
+        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandh,res=res,layers=layers,type='v',name='HeadWell',label=label)
         self.Nunknowns = self.Nparam
-        self.xc = self.xw + self.rw; self.yc = self.yw # To make sure the point is always the same for all elements
     def initialize(self):
         WellBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
-        self.pc = self.aq.T[self.pylayer] # Needed in solving; We solve for a unit head
+        self.pc = self.aq.T[self.pylayers] # Needed in solving; We solve for a unit head
         
 class HeadLineSink(LineSinkBase,HeadEquation):
     '''HeadLineSink of which the head varies through time. May be screened in multiple layers but all with the same head'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandh=[(0.0,1.0)],res=0.0,layer=1,label=None,addtomodel=True,parent=None):
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandh=[(0.0,1.0)],res=0.0,layers=1,label=None,addtomodel=True):
         self.storeinput(inspect.currentframe())
-        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandh,res=res,layer=layer,type='v',name='HeadLineSink',label=label,addtomodel=addtomodel,parent=parent)
+        LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandh,res=res,layers=layers,type='v',name='HeadLineSink',label=label,addtomodel=addtomodel)
         self.Nunknowns = self.Nparam
     def initialize(self):
         LineSinkBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
-        self.pc = self.aq.T[self.pylayer] # Needed in solving; We solve for a unit head
-        
-def HeadLineSinkStringOld(model,xy=[(-1,0),(1,0)],tsandh=[(0.0,1.0)],res=0.0,layer=1):
-    # Helper function to create string of line-sinks
-    lslist = []
-    xy = np.atleast_2d(xy)
-    for i in range(len(xy)-1):
-        ls = HeadLineSink(model,xy[i,0],xy[i,1],xy[i+1,0],xy[i+1,1],tsandh,res,layer)
-        lslist.append(ls)
-    return lslist
+        self.pc = self.aq.T[self.pylayers] # Needed in solving; We solve for a unit head
 
-class HeadLineSinkString(Element):
-    def __init__(self,model,xy=[(-1,0),(1,0)],tsandh=[(0.0,1.0)],res=0.0,layer=1,label=None):
-        Element.__init__(self, model, Nparam=1, Nunknowns=0, layer=layer, tsandbc=tsandh, type='v', name='HeadLineSinkString', label=label)
+class LineSinkStringBase(Element):
+    def __init__(self,model,xy=[(-1,0),(1,0)],tsandbc=[(0.0,1.0)],res=0.0,layers=1,type='',name='LineSinkStringBase',label=None):
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layers=layers, tsandbc=tsandbc, type=type, name=name, label=label)
         xy = np.atleast_2d(xy).astype('d')
         self.x,self.y = xy[:,0], xy[:,1]
         self.Nls = len(self.x) - 1
-        self.Nlayer = len(self.pylayer)
-        self.Nparam = self.Nlayer * self.Nls
+        self.Ncp = self.Nls
+        self.Nparam = self.Nlayers * self.Nls
         self.Nunknowns = self.Nparam
-        self.L = np.sqrt( (self.x[1:]-self.x[:-1])**2 + (self.y[1:]-self.y[:-1])**2 )
         self.lsList = []
-        for i in range(self.Nls):
-            self.lsList.append( HeadLineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],tsandh=tsandh,res=res,layer=layer,label=None,addtomodel=False,parent=self) )
-        self.model.addElement(self)
     def __repr__(self):
         return self.name + ' with nodes ' + str(zip(self.x,self.y))
     def initialize(self):
-        for ls in self.lsList: ls.initialize()
+        self.resfac = []
+        for ls in self.lsList:
+            ls.initialize()
+            self.resfac.extend( ls.resfac.tolist() )  # Needed in solving
+        self.resfac = np.array(self.resfac)
         self.aq = self.model.aq.findAquiferData(self.lsList[0].xc,self.lsList[0].yc)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
         self.setbc()
+        # As parameters are only stored for the element not the list, we need to combine the following
         self.strengthinf = np.zeros((self.Nparam,self.aq.Naq,self.model.Np),'D')
-        self.strengthinflayer = np.zeros((self.Nparam,self.model.Np),'D')
+        self.strengthinflayers = np.zeros((self.Nparam,self.model.Np),'D')
+        self.xc, self.yc = np.zeros(self.Nls), np.zeros(self.Nls)
         for i in range(self.Nls):
-            self.strengthinf[i*self.Nls:i*self.Nls+self.Nlayer,:] = self.lsList[i].strengthinf
-            self.strengthinflayer[i*self.Nls:i*self.Nls+self.Nlayer,:] = self.lsList[i].strengthinflayer
+            self.strengthinf[i*self.Nlayers:(i+1)*self.Nlayers,:] = self.lsList[i].strengthinf[:]
+            self.strengthinflayers[i*self.Nlayers:(i+1)*self.Nlayers,:] = self.lsList[i].strengthinflayers
+            self.xc[i], self.yc[i] = self.lsList[i].xc, self.lsList[i].yc
     def potinf(self,x,y,aq=None):
         '''Returns array (Nunknowns,Nperiods)'''
         if aq is None: aq = self.model.aq.findAquiferData( x, y )
         rv = np.zeros((self.Nparam,aq.Naq,self.model.Np),'D')
         for i in range(self.Nls):
-            rv[i*self.Nls:i*self.Nls+self.Nlayer,:] = self.lsList[i].potinf(x,y,aq)
+            rv[i*self.Nlayers:(i+1)*self.Nlayers,:] = self.lsList[i].potinf(x,y,aq)
         return rv
-    def strength(self,t,derivative=0): # Added here as I need to multiply strength by L for each line-sink
-        time = np.atleast_1d(t).copy()
-        rv = np.zeros((self.Nlayer,len(time)))
-        # Ugly statement to make array of L values
-        L = np.ravel(self.L[:,np.newaxis]*np.ones(self.Nlayer))
-        paramtimesL = self.parameters * L[:,np.newaxis]
-        s = np.sum( paramtimesL[:,:,np.newaxis,:] * self.strengthinf, 1 )
-        s = np.sum( s[:,np.newaxis,:,:] * self.model.aq.eigvec, 2 ) * self.model.p ** derivative
-        for k in range(self.model.Ngvbc):
-            e = self.model.gvbcList[k]
-            for itime in range(e.Ntstart):
-                t = time - e.tstart[itime]
-                for i in self.pylayer:
-                    rv[i] += e.bc[itime] * self.model.inverseLapTran(s[k,i],t)
-        return rv
-    def equation(self):
-        mat = np.empty( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' )
-        rhs = np.empty( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )
-        for i in range(self.Nls):
-            mat[i*self.Nls:i*self.Nls+self.Nlayer,:],rhs[i*self.Nls:i*self.Nls+self.Nlayer,:] = self.lsList[i].equation() 
-        return mat, rhs
     
-def xsection(ml,x1=0,x2=1,y1=0,y2=0,N=100,t=1,layer=1,color=None,lw=1,newfig=True):
+#class LineSinkString(LineSinkStringBase):
+#    def __init__(self,model,xy=[(-1,0),(1,0)],tsandQ=[(0.0,1.0)],res=0.0,layers=1,label=None):
+#        LineSinkStringBase.__init__(self,model,xy=xy,tsandbc=tsandQ,res=res,layers=layers,type='g',name='LineSinkString',label=label)
+#        for i in range(self.Nls):
+#            self.lsList.append( LineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],tsandQ=tsandQ,res=res,layers=layers,label=None,addtomodel=False) )
+#        self.model.addElement(self)
+    
+class ZeroMscreenLineSinkString(LineSinkStringBase,MscreenEquation):
+    def __init__(self,model,xy=[(-1,0),(1,0)],res=0.0,layers=[1,2],label=None):
+        LineSinkStringBase.__init__(self,model,xy=xy,tsandbc=[(0.0,0.0)],res=res,layers=layers,type='z',name='ZeroMscreenLineSinkString',label=label)
+        for i in range(self.Nls):
+            self.lsList.append( ZeroMscreenLineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],res=res,layers=layers,label=None,addtomodel=False) )
+        self.model.addElement(self)
+    
+class MscreenLineSinkString(LineSinkStringBase,MscreenEquation):
+    def __init__(self,model,xy=[(-1,0),(1,0)],tsandQ=[(0.0,1.0)],res=0.0,layers=[1,2],label=None):
+        LineSinkStringBase.__init__(self,model,xy=xy,tsandbc=tsandQ,res=res,layers=layers,type='v',name='MscreenLineSinkString',label=label)
+        for i in range(self.Nls):
+            self.lsList.append( MscreenLineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],tsandQ=tsandQ,res=res,layers=layers,label=None,addtomodel=False) )
+        self.model.addElement(self)
+    
+class ZeroHeadLineSinkString(LineSinkStringBase,HeadEquation):
+    def __init__(self,model,xy=[(-1,0),(1,0)],res=0.0,layers=1,label=None):
+        LineSinkStringBase.__init__(self,model,xy=xy,tsandbc=[(0.0,0.0)],res=res,layers=layers,type='z',name='ZeroHeadLineSinkString',label=label)
+        for i in range(self.Nls):
+            self.lsList.append( ZeroHeadLineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],res=res,layers=layers,label=None,addtomodel=False) )
+        self.model.addElement(self)
+
+class HeadLineSinkString(LineSinkStringBase,HeadEquation):
+    def __init__(self,model,xy=[(-1,0),(1,0)],tsandh=[(0.0,1.0)],res=0.0,layers=1,label=None):
+        LineSinkStringBase.__init__(self,model,xy=xy,tsandbc=tsandh,res=res,layers=layers,type='v',name='HeadLineSinkString',label=label)
+        for i in range(self.Nls):
+            self.lsList.append( HeadLineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],tsandh=tsandh,res=res,layers=layers,label=None,addtomodel=False) )
+        self.model.addElement(self)
+    def initialize(self):
+        LineSinkStringBase.initialize(self)
+        self.pc = np.zeros(self.Nls*self.Nlayers)
+        for i in range(self.Nls): self.pc[i*self.Nlayers:(i+1)*self.Nlayers] = self.lsList[i].pc
+    
+def xsection(ml,x1=0,x2=1,y1=0,y2=0,N=100,t=1,layers=1,color=None,lw=1,newfig=True):
     if newfig: plt.figure()
     x = np.linspace(x1,x2,N)
     y = np.linspace(y1,y2,N)
     s = np.sqrt( (x-x[0])**2 + (y-y[0])**2 )
-    h = ml.headalongline(x,y,t,layer)
-    Nlayer,Ntime,Nx = h.shape
-    for i in range(Nlayer):
+    h = ml.headalongline(x,y,t,layers)
+    Nlayers,Ntime,Nx = h.shape
+    for i in range(Nlayers):
         for j in range(Ntime):
             if color is None:
                 plt.plot(s,h[i,j,:],lw=lw)
@@ -851,12 +831,12 @@ def xsection(ml,x1=0,x2=1,y1=0,y2=0,N=100,t=1,layer=1,color=None,lw=1,newfig=Tru
                 plt.plot(s,h[i,j,:],color,lw=lw)
     plt.show()
                 
-def timcontour( ml, xmin, xmax, nx, ymin, ymax, ny, levels = 10, t=0.0, layer = 1,\
+def timcontour( ml, xmin, xmax, nx, ymin, ymax, ny, levels = 10, t=0.0, layers = 1,\
                color = 'k', lw = 0.5, style = 'solid',layout = True, newfig = True, \
                labels = False, labelfmt = '%1.2f'):
     '''Contour heads with pylab'''
     print 'grid of '+str((nx,ny))+'. gridding in progress. hit ctrl-c to abort'
-    h = ml.headgrid(xmin,xmax,nx,ymin,ymax,ny,t,layer)  # h[Nlayers,Ntimes,Ny,Nx]
+    h = ml.headgrid(xmin,xmax,nx,ymin,ymax,ny,t,layers)  # h[Nlayers,Ntimes,Ny,Nx]
     xg, yg = np.linspace(xmin,xmax,nx), np.linspace(ymin,ymax,ny)
     Nlayers, Ntimes = h.shape[0:2]
     # Contour
@@ -895,32 +875,99 @@ def pylayout( ml, ax, color = 'k', lw = 0.5, style = '-' ):
             ax.fill( x, y, facecolor = [col,col,col], edgecolor = [col,col,col] )
 
 ##########################################
+
+
+ml = ModelMaq([1,20,2],[25,20,18,10,8,0],c=[1000,2000],Saq=[0.1,1e-4,1e-4],Sll=[0,0],phreatictop=True,tmin=0.1,tmax=10000,M=30)
+w = Well(ml,0,0,.1,tsandQ=[(0,1000)],layers=[2])
+ml.solve()
+#ml1 = ModelMaq([1,20,2],[25,20,18,10,8,0],c=[1000,2000],Saq=[1e-4,1e-4,1e-4],Sll=[0,0],tmin=0.1,tmax=10000,M=30)
+#w1 = Well(ml1,0,0,.1,tsandQ=[(0,1000)],layers=[2],res=0.1)
+#ml1.solve()
+t = np.logspace(-1,3,100)
+h0 = ml.head(50,0,t)
+#h1 = ml1.head(50,0,t)
+#w = MscreenWell(ml,0,0,.1,tsandQ=[(0,1000),(100,0),(365,1000),(465,0)],layers=[2,3])
+#w2 = HeadWell(ml,50,0,.2,tsandh=[(0,1)],layers=[2])
+#y = [-500,-300,-200,-100,-50,0,50,100,200,300,500]
+#x = 50 * np.ones(len(y))
+#ls = ZeroHeadLineSinkString(ml,xy=zip(x,y),layers=[1])
+#w = Well(ml,0,0,.1,tsandQ=[(0,1000),(100,0)],layers=[2])
+#ml.solve()
+
+
+#ml = Model3D( kaq=[2,1,5,10,4], z=[10,8,6,4,2,0], Saq=[.1,.0001,.0002,.0002,.0001], phreatictop=True, kzoverkh=0.1, tmin=1e-3, tmax=1e3 )
+#w = MscreenWell(ml,0,-25,rw=.3,tsandQ=[(0,100),(100,50)],layers=[2,3])
+#ml.solve()
     
 ##ml = Model3D(kaq=2.0,z=[10,5,0],Saq=[.002,.001],kzoverkh=0.2,phreatictop=False,tmin=.1,tmax=10,M=15)
-#ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=0.1,tmax=10,M=15)
-#ls1 = LineSink(ml,-10,-10,0,-5,tsandsig=[(0,.05),(1,.02)],res=1.0,layer=[1,2],label='mark1')
-#ls2 = LineSink(ml,0,-5,10,10,tsandsig=[(0,.03),(2,.07)],layer=[1],label='mark2')
-##ls3 = HeadLineSink(ml,-10,5,0,5,tsandh=[(0,0.02),(3,0.01)],res=0.0,layer=[1,2])
-#lss = HeadLineSinkString(ml,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=0.0,layer=[1,2])
-##lss = HeadLineSinkString(ml,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=0.0,layer=[1,2])
-##ls3 = ZeroMscreenLineSink(ml,-10,5,0,5,res=1.0,layer=[1,2])
-##tQ = np.array([
-##    (0,5),
-##    (1,2)])
-##w1 = Well(ml,0,0,.1,tsandQ=tQ,res=1.0,layer=[1,2])
-##w2 = Well(ml,100,0,.1,tsandQ=[(0,3),(2,7)],layer=[1])
-##w3 = MscreenWell(ml,0,100,.1,tsandQ=[(0,2),(3,1)],res=2.0,layer=[1,2])
-##w3 = ZeroMscreenWell(ml,0,100,.1,res=2.0,layer=[1,2])
-##w3 = ZeroHeadWell(ml,0,100,.1,res=1.0,layer=[1,2])
-##w3 = HeadWell(ml,0,100,.1,tsandh=[(0,2),(3,1)],res=1.0,layer=[1,2])
+#ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.1,tmax=10,M=15)
+##L1 = np.sqrt(10**2+5**2)
+##ls1 = LineSink(ml,-10,-10,0,-5,tsandQ=[(0,.05*L1),(1,.02*L1)],res=1.0,layers=[1,2],label='mark1')
+#w = MscreenWell(ml,-5,-5,.1,[0,5],layers=[1,2])
+#L2 = np.sqrt(10**2+15**2)
+#ls2 = LineSink(ml,0,-5,10,10,tsandQ=[(0,.03*L2),(2,.07*L2)],layers=[1],label='mark2')
+##ls3a = ZeroHeadLineSink(ml,-10,5,-5,5,res=1.0,layers=[1,2])
+##ls3b = ZeroHeadLineSink(ml,-5,5,0,5,res=1.0,layers=[1,2])
+##ls3c = ZeroHeadLineSink(ml,0,5,5,5,res=1.0,layers=[1,2])
+##lss = HeadLineSinkString(ml,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=1.0,layers=[1,2])
+#lss = ZeroHeadLineSinkString(ml,[(-10,5),(-5,5),(0,5),(5,5)],res=1.0,layers=[1,2])
+##lss = MscreenLineSinkString(ml,[(-10,5),(-5,5),(0,5)],tsandQ=[(0,0.2),(3,0.1)],res=1.0,layers=[1,2])
+##lss = ZeroMscreenLineSinkString(ml,[(-10,5),(-5,5),(0,5)],res=1.0,layers=[1,2])
+##ml.initialize()
 #ml.solve()
-##print ml.potential(2,3,[.5,5])
 #print ml.potential(50,50,[0.5,5])
+
+#ml2 = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.1,tmax=10,M=15)
+#L1 = np.sqrt(10**2+5**2)
+#ls1b = LineSink(ml2,-10,-10,0,-5,tsandQ=[(0,.05*L1),(1,.02*L1)],res=1.0,layers=[1,2],label='mark1')
+#L2 = np.sqrt(10**2+15**2)
+#ls2b = LineSink(ml2,0,-5,10,10,tsandQ=[(0,.03*L2),(2,.07*L2)],layers=[1],label='mark2')
+##ls3a = HeadLineSink(ml2,-10,5,-5,5,tsandh=[(0,0.02),(3,0.01)],res=1.0,layers=[1,2])
+##ls3b = HeadLineSink(ml2,-5,5,0,5,tsandh=[(0,0.02),(3,0.01)],res=1.0,layers=[1,2])
+##ls3a = ZeroHeadLineSink(ml2,-10,5,-5,5,res=1.0,layers=[1,2])
+##ls3b = ZeroHeadLineSink(ml2,-5,5,0,5,res=1.0,layers=[1,2])
+##ls3a = MscreenLineSink(ml2,-10,5,-5,5,tsandQ=[(0,0.2),(3,0.1)],res=1.0,layers=[1,2])
+##ls3b = MscreenLineSink(ml2,-5,5,0,5,tsandQ=[(0,0.2),(3,0.1)],res=1.0,layers=[1,2])
+#ls3a = ZeroMscreenLineSink(ml2,-10,5,-5,5,res=1.0,layers=[1,2])
+#ls3b = ZeroMscreenLineSink(ml2,-5,5,0,5,res=1.0,layers=[1,2])
+##lssb = HeadLineSinkStringOld(ml2,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=0.0,layers=[1,2])
+#ml2.solve()
+#print ml2.potential(50,50,[0.5,5])
+
+#lss = HeadLineSinkString(ml,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=1.0,layers=[1,2])
+#lss = MscreenLineSinkString(ml,[(-10,5),(-5,5),(0,5)],tsandQ=[(0,.03*5),(2,.07*5)],res=0.5,layers=[1,2])
+#ls3a = MscreenLineSink(ml,-10,5,-5,5,tsandQ=[(0,.03*5),(2,.07*5)],res=0.5,layers=[1,2])
+#ls3b = MscreenLineSink(ml,-5,5,0,5,tsandQ=[(0,.03*5),(2,.07*5)],res=0.5,layers=[1,2])
+#
+#ml2 = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.1,tmax=10,M=15)
+#L1 = np.sqrt(10**2+5**2)
+#ls1a = LineSink(ml2,-10,-10,0,-5,tsandQ=[(0,.05*L1),(1,.02*L1)],res=1.0,layers=[1,2],label='mark1')
+#L2 = np.sqrt(10**2+15**2)
+#ls2a = LineSink(ml2,0,-5,10,10,tsandQ=[(0,.03*L2),(2,.07*L2)],layers=[1],label='mark2')
+#ls3a = HeadLineSink(ml2,-10,5,-5,5,tsandh=[(0,0.02),(3,0.01)],res=1.0,layers=[1,2])
+#ls3b = HeadLineSink(ml2,-5,5,0,5,tsandh=[(0,0.02),(3,0.01)],res=1.0,layers=[1,2])
+
+
+##lss = HeadLineSinkString(ml,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=0.0,layers=[1,2])
+##ls3 = ZeroMscreenLineSink(ml,-10,5,0,5,res=1.0,layers=[1,2])
+#ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.1,tmax=10,M=15)
+#w1 = Well(ml,0,0,.1,tsandQ=[(0,5),(1,2)],res=1.0,layers=[1,2])
+#w2 = Well(ml,100,0,.1,tsandQ=[(0,3),(2,7)],layers=[1])
+##w3 = MscreenWell(ml,0,100,.1,tsandQ=[(0,2),(3,1)],res=2.0,layers=[1,2])
+#w3 = ZeroMscreenWell(ml,0,100,.1,res=2.0,layers=[1,2])
+##w3 = ZeroHeadWell(ml,0,100,.1,res=1.0,layers=[1,2])
+##w3 = HeadWell(ml,0,100,.1,tsandh=[(0,2),(3,1)],res=1.0,layers=[1,2])
+#ml.solve()
+###print ml.potential(2,3,[.5,5])
+#print ml.potential(50,50,[0.5,5])
+#ml2.solve()
+#print ml2.potential(50,50,[.5,5])
+#print lss.strength([.5,5])
 #
 #ml2 = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=0.1,tmax=10,M=15)
-#ls1a = LineSink(ml2,-10,-10,0,-5,tsandsig=[(0,.05),(1,.02)],res=1.0,layer=[1,2],label='mark1')
-#ls2a = LineSink(ml2,0,-5,10,10,tsandsig=[(0,.03),(2,.07)],layer=[1],label='mark2')
-#ls3a = HeadLineSinkStringOld(ml2,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=0.0,layer=[1,2])
+#ls1a = LineSink(ml2,-10,-10,0,-5,tsandsig=[(0,.05),(1,.02)],res=1.0,layers=[1,2],label='mark1')
+#ls2a = LineSink(ml2,0,-5,10,10,tsandsig=[(0,.03),(2,.07)],layers=[1],label='mark2')
+#ls3a = HeadLineSinkStringOld(ml2,[(-10,5),(-5,5),(0,5)],tsandh=[(0,0.02),(3,0.01)],res=0.0,layers=[1,2])
 #ml2.solve()
 #print ml2.potential(50,50,[0.5,5])
 

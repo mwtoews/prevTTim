@@ -3,8 +3,8 @@ from ttim2 import *
 
 ml = ModelMaq(kaq=[1.0,5.0],z=[3,2,1,0],c=[10.],Saq=[0.03,0.03],Sll=[0.001],tmin=.001,tmax=100.0,M=20)
 xy = zip(-5*ones(11),linspace(-5,5,11))
-ZeroMscreenLineSinkString(ml,xy=xy,layer=[1,2])
-Well(ml, xw=0, yw=0, rw=0.1, tsandQ=[(0,-10.)], layer=1)
+ZeroMscreenLineSinkString(ml,xy=xy,layers=[1,2])
+Well(ml, xw=0, yw=0, rw=0.1, tsandQ=[(0,-10.)], layers=1)
 ml.solve()
 
 ######################################################
@@ -12,8 +12,8 @@ ml.solve()
 # output read from data files *.dat in ttim directory
 ###################################################
 
-from ttim2 import __file__ as ttimdir
-ttimdir = ttimdir[:-len('ttim2.pyc')]
+import os
+ttimdir = os.path.dirname( os.path.abspath( __file__ ) ) + '/'  # abspath includes filename. just dirname doesn't work when you are in the directory
 
 t = 10**linspace(-2,1.69897000434,100)
 
@@ -30,7 +30,6 @@ legend(('ttim, upper', 'ttim, lower', 'MODFLOW, upper', 'MODFLOW, lower'), loc=2
 xlabel('time')
 ylabel('minus drawdown')
 title('north end of crack')
-show()
 
 t = 10**linspace(-2,1.69897000434,100)
 
@@ -45,7 +44,6 @@ legend(('ttim, upper', 'ttim, lower', 'MODFLOW, upper', 'MODFLOW, lower'), loc=2
 xlabel('time')
 ylabel('minus drawdown')
 title('center of crack')
-show()
 
 t = 10**linspace(-2,1.69897000434,100)
 
@@ -60,7 +58,6 @@ legend(('ttim, upper', 'ttim, lower', 'MODFLOW, upper', 'MODFLOW, lower'), loc=2
 xlabel('time')
 ylabel('minus drawdown')
 title('south end of crack')
-show()
 
 subplot(224)
 crackxs=loadtxt(ttimdir+'Crackxst10.dat')
