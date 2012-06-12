@@ -551,27 +551,7 @@ class MscreenEquation:
                 rhs[istart+self.Nlayers-1,self.model.Ngbc+iself,:] = 1.0  # If self.type == 'z', it should sum to zero, which is the default value of rhs
         return mat, rhs
     
-class HconnEquation:
-    def equation(self):
-        mat = np.zeros( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' ) # Important to set to zero for some of the equations
-        rhs = np.zeros( (self.Nunknowns, self.model.Np), 'D' )
-        disinf = self.strengthinflayer()
-        ieq = 0
-        for e in self.model.elementList:
-            if e.Nunknowns > 0:
-                head = e.potinflayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis,np.newaxis]
-                mat[:-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:,:] - head[1:,:,:]
-                if e == self:
-                    for i in range(self.Nunknowns-1):
-                        mat[i,ieq:ieq+i+1,:] -= self.res[i] * disinf[i]
-                    mat[-1,ieq:ieq+e.Nunknowns,:] = 1.0
-                ieq += e.Nunknowns
-            else:
-                head = e.potentiallayer(self.xc,self.yc,self.pylayer) / self.aq.T[self.pylayer][:,np.newaxis]
-                rhs[:-1,:] -= head[:-1,:] - head[1:,:]
-        return mat, rhs
-    
-class MscreenEquationOk:
+class MscreenDitchEquation:
     def equation(self):
         '''Mix-in class that returns matrix rows for multi-scren conditions where total discharge is specified.
         Works for Nunknowns = 1
@@ -589,18 +569,32 @@ class MscreenEquationOk:
                 if e.Nunknowns > 0:
                     head = e.potinflayers(self.xc[icp],self.yc[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis,np.newaxis]  # T[self.pylayers,np.newaxis,np.newaxis] is not allowed
                     mat[istart:istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:] - head[1:,:]
+                    mat[istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[0,:] # Store head in top layer in last equation of this control point
                     if e == self:
+                        if icp == 0:
+                            istartself = ieq  # Needed to build last equation
                         for i in range(self.Nlayers-1):
                             mat[istart+i,ieq+istart+i,:] -= self.resfach[istart+i] * e.strengthinflayers[istart+i]
                             mat[istart+i,ieq+istart+i+1,:] += self.resfach[istart+i+1] * e.strengthinflayers[istart+i+1]
-                        mat[istart+self.Nlayers-1,ieq+istart:ieq+istart+self.Nlayers,:] = 1.0
+                            mat[istart+i,ieq+istart:ieq+istart+i+1,:] -= self.vresfac[istart+i] * e.strengthinflayers[istart+i]
                     ieq += e.Nunknowns
             for i in range(self.model.Ngbc):
                 head = self.model.gbcList[i].unitpotentiallayers(self.xc[icp],self.yc[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis]
                 rhs[istart:istart+self.Nlayers-1,i,:] -= head[:-1,:] - head[1:,:]
-            if self.type == 'v':
-                iself = self.model.vbcList.index(self)
-                rhs[istart+self.Nlayers-1,self.model.Ngbc+iself,:] = 1.0  # If self.type == 'z', it should sum to zero, which is the default value of rhs
+                rhs[istart+self.Nlayers-1,i,:] -= head[0,:] # Store minus the head in top layer in last equation for this control point
+        # Modify last equations
+        for icp in range(self.Ncp-1):
+            ieq = (icp+1) * self.Nlayers - 1
+            mat[ieq,:,:] -= mat[ieq+self.Nlayers,:,:]  # Head first layer control point icp - Head first layer control point icp + 1
+            rhs[ieq,:,:] -= rhs[ieq+self.Nlayers,:,:]
+        # Last equation setting the total discharge of the ditch
+        print 'istartself ',istartself
+        mat[-1,:,:] = 0.0  
+        mat[-1,istartself:istartself+self.Nparam,:] = 1.0
+        rhs[-1,:,:] = 0.0
+        if self.type == 'v':
+            iself = self.model.vbcList.index(self)
+            rhs[-1,self.model.Ngbc+iself,:] = 1.0  # If self.type == 'z', it should sum to zero, which is the default value of rhs
         return mat, rhs
     
 class WellBase(Element):
@@ -875,7 +869,17 @@ class MscreenLineSinkString(LineSinkStringBase,MscreenEquation):
         for i in range(self.Nls):
             self.lsList.append( MscreenLineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],tsandQ=tsandQ,res=res,wh=wh,layers=layers,label=None,addtomodel=False) )
         self.model.addElement(self)
-    
+        
+class MscreenLineSinkDitchString(LineSinkStringBase,MscreenDitchEquation):
+    def __init__(self,model,xy=[(-1,0),(1,0)],tsandQ=[(0.0,1.0)],res=0.0,wh='H',layers=[1,2],label=None):
+        LineSinkStringBase.__init__(self,model,xy=xy,tsandbc=tsandQ,layers=layers,type='v',name='MscreenLineSinkStringDitch',label=label)
+        for i in range(self.Nls):
+            self.lsList.append( MscreenLineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],tsandQ=tsandQ,res=res,wh=wh,layers=layers,label=None,addtomodel=False) )
+        self.model.addElement(self)
+    def initialize(self):
+        LineSinkStringBase.initialize(self)
+        self.vresfac = np.zeros_like( self.resfach )  # set to zero, as I don't quite know what it would mean if it is not zero
+        
 class ZeroHeadLineSinkString(LineSinkStringBase,HeadEquation):
     def __init__(self,model,xy=[(-1,0),(1,0)],res=0.0,wh='H',layers=1,label=None):
         LineSinkStringBase.__init__(self,model,xy=xy,tsandbc=[(0.0,0.0)],layers=layers,type='z',name='ZeroHeadLineSinkString',label=label)
@@ -1001,6 +1005,11 @@ def timlayout( ml, ax, color = 'k', lw = 0.5, style = '-' ):
 
 ##########################################
 
+ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.1,tmax=10)
+w1 = Well(ml,0,2,.1,tsandQ=[(0,10)],layers=[1])
+ls2 = ZeroHeadLineSinkString(ml,xy=[(-10,-2),(0,-4),(4,0)],layers=[1])
+ls1 = MscreenLineSinkDitchString(ml,xy=[(-10,0),(0,0),(10,10)],tsandQ=[(0.0,7.0)],res=0.0,wh='H',layers=[1,2],label=None)
+ml.solve()
 
 #ml = ModelMaq([1,20,2],[25,20,18,10,8,0],c=[1000,2000],Saq=[0.1,1e-4,1e-4],Sll=[0,0],phreatictop=True,tmin=0.1,tmax=10000,M=30)
 #w1 = Well(ml,0,0,.1,tsandQ=[(0,1000)],layers=[2])
