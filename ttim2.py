@@ -83,11 +83,6 @@ class TimModel:
     def potential(self,x,y,t,pylayers=None,aq=None,derivative=0):
         '''Returns pot[Naq,Ntimes] if layers=None, otherwise pot[len(pylayers,Ntimes)]
         t must be ordered '''
-        #
-        if derivative > 0:
-            print 'derivative > 0 not yet implemented in potential'
-            return
-        #
         if aq is None: aq = self.aq.findAquiferData(x,y)
         if pylayers is None: pylayers = range(aq.Naq)
         Nlayers = len(pylayers)
@@ -101,6 +96,7 @@ class TimModel:
             pot = np.sum( pot[:,np.newaxis,:,:] * aq.eigvec, 2 )
         else:
             pot = np.sum( pot[:,np.newaxis,:,:] * aq.eigvec[pylayers,:], 2 )
+        if derivative > 0: pot *= self.p**derivative
         rv = np.zeros((Nlayers,len(time)))
         if (time[0] < self.tmin) or (time[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
         #
@@ -159,6 +155,19 @@ class TimModel:
     def headgrid(self,x1,x2,nx,y1,y2,ny,t,layers=None):
         '''Returns h[Nlayers,Ntimes,Ny,Nx]. If layers is None, all layers are returned'''
         xg,yg = np.linspace(x1,x2,nx), np.linspace(y1,y2,ny)
+        if layers is None:
+            Nlayers = self.aq.findAquiferData(xg[0],yg[0]).Naq
+        else:
+            Nlayers = len(np.atleast_1d(layers))
+        t = np.atleast_1d(t)
+        h = np.empty( (Nlayers,len(t),ny,nx) )
+        for j in range(ny):
+            for i in range(nx):
+                h[:,:,j,i] = self.head(xg[i],yg[j],t,layers)
+        return h
+    def headgrid2(self,xg,yg,t,layers=None):
+        '''Returns h[Nlayers,Ntimes,Ny,Nx]. If layers is None, all layers are returned'''
+        nx,ny = len(xg), len(yg)
         if layers is None:
             Nlayers = self.aq.findAquiferData(xg[0],yg[0]).Naq
         else:
@@ -241,14 +250,16 @@ class TimModel:
         f.close()
         
 class ModelMaq(TimModel):
-    def __init__(self,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[],topboundary='imp',phreatictop=False,tmin=1,tmax=10,M=20):
+    def __init__(self,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False,tmin=1,tmax=10,M=20):
         self.storeinput(inspect.currentframe())
         kaq = np.atleast_1d(kaq).astype('d')
         Naq = len(kaq)
         z = np.atleast_1d(z).astype('d')
         c = np.atleast_1d(c).astype('d')
         Saq = np.atleast_1d(Saq).astype('d')
+        if len(Saq) == 1: Saq = Saq * np.ones(Naq)
         Sll = np.atleast_1d(Sll).astype('d')
+        if len(Sll) == 1: Sll = Sll * np.ones(Naq)
         H = z[:-1] - z[1:]
         assert np.all(H >= 0), 'Error: Not all layers thicknesses are non-negative' + str(H) 
         if topboundary[:3] == 'imp':
@@ -516,10 +527,71 @@ class HeadEquation:
                 for i in range(self.Nlayers):
                     rhs[istart+i,self.model.Ngbc+iself,:] = self.pc[istart+i] / self.model.p
         return mat, rhs
+    
+class HeadEquationNew:
+    '''Variable Head BC'''
+    def equation(self):
+        '''Mix-in class that returns matrix rows for head-specified conditions. (really written as constant potential element)
+        Works for Nunknowns = 1
+        Returns matrix part Nunknowns,Neq,Np, complex
+        Returns rhs part Nunknowns,Nvbc,Np, complex
+        Phi_out - c*T*q_s = Phi_in
+        Well: q_s = Q / (2*pi*r_w*H)
+        LineSink: q_s = sigma / H = Q / (L*H)
+        '''
+        mat = np.empty( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' )
+        rhs = np.zeros( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )  # Needs to be initialized to zero
+        for icp in range(self.Ncp):
+            istart = icp*self.Nlayers
+            ieq = 0  
+            for e in self.model.elementList:
+                if e.Nunknowns > 0:
+                    mat[istart:istart+self.Nlayers,ieq:ieq+e.Nunknowns,:] = e.potinflayers(self.xc[icp],self.yc[icp],self.pylayers)
+                    if e == self:
+                        for i in range(self.Nlayers): mat[istart+i,ieq+istart+i,:] -= self.resfacp[istart+i] * e.strengthinflayers[istart+i]
+                    ieq += e.Nunknowns
+            for i in range(self.model.Ngbc):
+                rhs[istart:istart+self.Nlayers,i,:] -= self.model.gbcList[i].unitpotentiallayers(self.xc[icp],self.yc[icp],self.pylayers)  # Pretty cool that this works, really
+            if self.type == 'v':
+                iself = self.model.vbcList.index(self)
+                for i in range(self.Nlayers):
+                    rhs[istart+i,self.model.Ngbc+iself,:] = self.pc[istart+i,:]
+        return mat, rhs
+    
+class WellBoreStorageEquation:
+    def equation(self):
+        '''Mix-in class that returns matrix rows for multi-aquifer element with
+        total given discharge, uniform but unknown head and InternalStorageEquation
+        '''
+        mat = np.zeros( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' ) # Important to set to zero for some of the equations
+        rhs = np.zeros( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )  # Needs to be initialized to zero
+        ieq = 0
+        for e in self.model.elementList:
+            if e.Nunknowns > 0:
+                head = e.potinflayers(self.xc,self.yc,self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis,np.newaxis]
+                mat[:-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:] - head[1:,:]
+                mat[-1,ieq:ieq+e.Nunknowns,:] -= np.pi * self.rc**2 * self.model.p * head[0,:]
+                if e == self:
+                    disterm = self.strengthinflayers * self.res / ( 2 * np.pi * self.rw * self.aq.Haq[self.pylayers][:,np.newaxis] )
+                    if self.Nunknowns > 1:  # Multiple layers
+                        for i in range(self.Nunknowns-1):
+                            mat[i,ieq+i,:] -= disterm[i]
+                            mat[i,ieq+i+1,:] += disterm[i+1]
+                    mat[-1,ieq:ieq+self.Nunknowns,:] += self.strengthinflayers
+                    mat[-1,ieq,:] += np.pi * self.rc**2 * self.model.p * disterm[0]
+                ieq += e.Nunknowns
+        for i in range(self.model.Ngbc):
+            head = self.model.gbcList[i].unitpotentiallayers(self.xc,self.yc,self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis]
+            rhs[:-1,i,:] -= head[:-1,:] - head[1:,:]
+            rhs[-1,i,:] += np.pi * self.rc**2 * self.model.p * head[0,:]
+        if self.type == 'v':
+            iself = self.model.vbcList.index(self)
+            rhs[-1,self.model.Ngbc+iself,:] += self.flowcoef
+        return mat, rhs
 
 class MscreenEquation:
     def equation(self):
-        '''Mix-in class that returns matrix rows for multi-scren conditions where total discharge is specified.
+        '''Mix-in class that returns matrix rows for multi-screen conditions where total discharge is specified.
         Works for Nunknowns = 1
         Returns matrix part Nunknowns,Neq,Np, complex
         Returns rhs part Nunknowns,Nvbc,Np, complex
@@ -568,7 +640,7 @@ class MscreenDitchEquation:
             for e in self.model.elementList:
                 if e.Nunknowns > 0:
                     head = e.potinflayers(self.xc[icp],self.yc[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis,np.newaxis]  # T[self.pylayers,np.newaxis,np.newaxis] is not allowed
-                    mat[istart:istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:] - head[1:,:]
+                    if self.Nlayers > 1: mat[istart:istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:] - head[1:,:]
                     mat[istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[0,:] # Store head in top layer in last equation of this control point
                     if e == self:
                         if icp == 0:
@@ -580,7 +652,7 @@ class MscreenDitchEquation:
                     ieq += e.Nunknowns
             for i in range(self.model.Ngbc):
                 head = self.model.gbcList[i].unitpotentiallayers(self.xc[icp],self.yc[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis]
-                rhs[istart:istart+self.Nlayers-1,i,:] -= head[:-1,:] - head[1:,:]
+                if self.Nlayers > 1: rhs[istart:istart+self.Nlayers-1,i,:] -= head[:-1,:] - head[1:,:]
                 rhs[istart+self.Nlayers-1,i,:] -= head[0,:] # Store minus the head in top layer in last equation for this control point
         # Modify last equations
         for icp in range(self.Ncp-1):
@@ -704,6 +776,28 @@ class Well(WellBase):
         self.storeinput(inspect.currentframe())
         WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layers=layers,type='g',name='Well',label=label)
         
+class MscreenWellNew(WellBase,WellBoreStorageEquation):
+    '''One or multi-screen well with wellbore storage'''
+    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layers=1,rc=None,wbstype='pumping',label=None):
+        self.storeinput(inspect.currentframe())
+        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layers=layers,type='v',name='WellBoreStorageWell',label=label)
+        if (rc is None) or (rc <= 0.0):
+            self.rc = 0.0
+        else:
+            self.rc = rc
+        self.Nunknowns = self.Nparam
+        self.wbstype = wbstype
+    def initialize(self):
+        WellBase.initialize(self)
+        self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
+    def setflowcoef(self):
+        '''Separate function so that this can be overloaded for other types'''
+        if self.wbstype == 'pumping':
+            self.flowcoef = 1.0 / self.model.p  # Step function
+        elif self.wbstype == 'slug':
+            self.flowcoef = 1.0  # Delta function
+
+        
 class LineSink(LineSinkBase):
     '''LineSink with non-zero and potentially variable discharge through time'''
     def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandQ=[(0.0,1.0)],res=0.0,wh='H',layers=1,label=None,addtomodel=True):
@@ -754,7 +848,7 @@ class MscreenWell(WellBase,MscreenEquation):
 class MscreenLineSink(LineSinkBase,MscreenEquation):
     '''MscreenLineSink that varies through time. Must be screened in multiple layers but heads are same in all screened layers'''
     def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandQ=[(0.0,1.0)],res=0.0,wh='H',layers=[1,2],label=None,addtomodel=True):
-        assert len(layers) > 1, "TTim input error: number of layers for MscreenLineSink must be at least 2"
+        #assert len(layers) > 1, "TTim input error: number of layers for MscreenLineSink must be at least 2"
         self.storeinput(inspect.currentframe())
         LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandQ,res=res,wh=wh,layers=layers,type='v',name='MscreenLineSink',label=label,addtomodel=addtomodel)
         self.Nunknowns = self.Nparam
@@ -792,6 +886,22 @@ class HeadWell(WellBase,HeadEquation):
         WellBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
         self.pc = self.aq.T[self.pylayers] # Needed in solving; We solve for a unit head
+        
+
+from scipy.special import erf
+def fbar(p,t0=100.0,a=20.0):
+    return np.sqrt(np.pi) / 2.0 * a * np.exp( -p*t0 + a**2*p**2/4.0 ) * ( 1.0 - erf( -t0/a + a*p/2.0 ) )
+class HeadWellNew(WellBase,HeadEquationNew):
+    '''HeadWell of which the head varies through time. May be screened in multiple layers but all with the same head'''
+    def __init__(self,model,xw=0,yw=0,rw=0.1,tsandh=[(0.0,1.0)],res=0.0,layers=1,label=None):
+        self.storeinput(inspect.currentframe())
+        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandh,res=res,layers=layers,type='v',name='HeadWell',label=label)
+        self.Nunknowns = self.Nparam
+    def initialize(self):
+        WellBase.initialize(self)
+        self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
+        self.pc = np.empty((1,self.model.Np),'D')
+        self.pc[0] = self.aq.T[self.pylayers] * fbar(self.model.p,t0=100,a=20.0) # Needed in solving
         
 class HeadLineSink(LineSinkBase,HeadEquation):
     '''HeadLineSink of which the head varies through time. May be screened in multiple layers but all with the same head'''
@@ -1005,17 +1115,28 @@ def timlayout( ml, ax, color = 'k', lw = 0.5, style = '-' ):
 
 ##########################################
 
-ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.1,tmax=10)
-w1 = Well(ml,0,2,.1,tsandQ=[(0,10)],layers=[1])
-ls2 = ZeroHeadLineSinkString(ml,xy=[(-10,-2),(0,-4),(4,0)],layers=[1])
-ls1 = MscreenLineSinkDitchString(ml,xy=[(-10,0),(0,0),(10,10)],tsandQ=[(0.0,7.0)],res=0.0,wh='H',layers=[1,2],label=None)
-ml.solve()
+#ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.01,tmax=10)
+#rw = 0.5
+#w = MscreenWellNew(ml,0,0,rw=rw,tsandQ=[(0.0,1.0)],res=1.0,rc=rw,layers=[1,2],wbstype='pumping')
+#ml.solve()
+#t = np.logspace(-2,1,10)
+#Q1 = w.strength(t)
+#Q2 = ml.head(0.1,0,t,derivative=1)*np.pi*rw**2
 
-#ml = ModelMaq([1,20,2],[25,20,18,10,8,0],c=[1000,2000],Saq=[0.1,1e-4,1e-4],Sll=[0,0],phreatictop=True,tmin=0.1,tmax=10000,M=30)
+
+
+
+#ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.1,tmax=10)
+#w1 = Well(ml,0,2,.1,tsandQ=[(0,10)],layers=[1])
+#ls2 = ZeroHeadLineSinkString(ml,xy=[(-10,-2),(0,-4),(4,0)],layers=[1])
+#ls1 = MscreenLineSinkDitchString(ml,xy=[(-10,0),(0,0),(10,10)],tsandQ=[(0.0,7.0)],res=0.0,wh='H',layers=[2],label=None)
+#ml.solve()
+
+#ml = ModelMaq([1,20,2],[25,20,18,10,8,0],c=[1000,2000],Saq=[0.1,1e-4,1e-4],Sll=[0,0],phreatictop=True,tmin=1e-6,tmax=10,M=30)
 #w1 = Well(ml,0,0,.1,tsandQ=[(0,1000)],layers=[2])
 #ls1 = ZeroMscreenLineSink(ml,10,-5,10,5,layers=[1,2,3],res=0.5,wh=1,vres=3,wv=1)
-##w2 = ZeroMscreenWell(ml,10,0,res=1.0,layers=[1,2,3],vres=1.0)
-##w3 = Well(ml,0,-10,.1,tsandQ=[(0,700)],layers=[2])
+#w2 = ZeroMscreenWell(ml,10,0,res=1.0,layers=[1,2,3],vres=1.0)
+#w3 = Well(ml,0,-10,.1,tsandQ=[(0,700)],layers=[2])
 #ml.solve()
 ##ml1 = ModelMaq([1,20,2],[25,20,18,10,8,0],c=[1000,2000],Saq=[1e-4,1e-4,1e-4],Sll=[0,0],tmin=0.1,tmax=10000,M=30)
 ##w1 = Well(ml1,0,0,.1,tsandQ=[(0,1000)],layers=[2],res=0.1)
@@ -1037,7 +1158,9 @@ ml.solve()
 #ml.solve()
     
 ##ml = Model3D(kaq=2.0,z=[10,5,0],Saq=[.002,.001],kzoverkh=0.2,phreatictop=False,tmin=.1,tmax=10,M=15)
-#ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.1,tmax=10,M=15)
+ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=100,tmax=300,M=50)
+w = HeadWellNew(ml,0,0,.1,tsandh=[(0.0,1.0)],layers=1)
+ml.solve()
 ##L1 = np.sqrt(10**2+5**2)
 ##ls1 = LineSink(ml,-10,-10,0,-5,tsandQ=[(0,.05*L1),(1,.02*L1)],res=1.0,layers=[1,2],label='mark1')
 #w = MscreenWell(ml,-5,-5,.1,[0,5],layers=[1,2])
