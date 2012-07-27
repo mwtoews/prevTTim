@@ -13,7 +13,7 @@ import inspect # Used for storing the input
 import os
 
 class TimModel:
-    def __init__(self,kaq=[1,1],Haq=[1,1],c=[np.nan,100],Saq=[0.3,0.003],Sll=[1e-3],topboundary='imp',tmin=1,tmax=10,M=20):
+    def __init__(self,kaq=[1,1],Haq=[1,1],c=[np.nan,100],Saq=[0.3,0.003],Sll=[0],topboundary='imp',tmin=1,tmax=10,M=20):
         self.elementList = []
         self.elementDict = {}
         self.vbcList = []  # List with variable boundary condition 'v' elements
@@ -259,13 +259,13 @@ class ModelMaq(TimModel):
         Saq = np.atleast_1d(Saq).astype('d')
         if len(Saq) == 1: Saq = Saq * np.ones(Naq)
         Sll = np.atleast_1d(Sll).astype('d')
-        if len(Sll) == 1: Sll = Sll * np.ones(Naq)
         H = z[:-1] - z[1:]
         assert np.all(H >= 0), 'Error: Not all layers thicknesses are non-negative' + str(H) 
         if topboundary[:3] == 'imp':
             assert len(z) == 2*Naq, 'Error: Length of z needs to be ' + str(2*Naq)
             assert len(c) == Naq-1, 'Error: Length of c needs to be ' + str(Naq-1)
             assert len(Saq) == Naq, 'Error: Length of Saq needs to be ' + str(Naq)
+            if len(Sll) == 1: Sll = Sll * np.ones(Naq-1)
             assert len(Sll) == Naq-1, 'Error: Length of Sll needs to be ' + str(Naq-1)
             Haq = H[::2]
             Saq = Saq * Haq
@@ -277,6 +277,7 @@ class ModelMaq(TimModel):
             assert len(z) == 2*Naq+1, 'Error: Length of z needs to be ' + str(2*Naq+1)
             assert len(c) == Naq, 'Error: Length of c needs to be ' + str(Naq)
             assert len(Saq) == Naq, 'Error: Length of Saq needs to be ' + str(Naq)
+            if len(Sll) == 1: Sll = Sll * np.ones(Naq)
             assert len(Sll) == Naq, 'Error: Length of Sll needs to be ' + str(Naq)
             Haq = H[1::2]
             Saq = Saq * Haq
@@ -472,7 +473,7 @@ class Element:
         else:
             s = np.sum( self.parameters[:,:,np.newaxis,:] * self.strengthinf, 1 )
             s = np.sum( s[:,np.newaxis,:,:] * self.aq.eigvec, 2 )
-            s = s[:,self.pylayers,:]
+            s = s[:,self.pylayers,:] * self.model.p ** derivative
             for k in range(self.model.Ngvbc):
                 e = self.model.gvbcList[k]
                 for itime in range(e.Ntstart):
@@ -710,9 +711,9 @@ class WellBase(Element):
                         rv[:,i,j,:] = self.term2[:,i,j,:] * pot
         rv.shape = (self.Nparam,aq.Naq,self.model.Np)
         return rv
-    def headinside(self,t):
+    def headinside(self,t,derivative=0):
         '''Returns head inside the well for the layers that the well is screened in'''
-        return self.model.head(self.xc,self.yc,t)[self.pylayers] - self.resfach[:,np.newaxis] * self.strength(t)
+        return self.model.head(self.xc,self.yc,t,derivative=derivative)[self.pylayers] - self.resfach[:,np.newaxis] * self.strength(t,derivative=derivative)
     def layout(self):
         return 'point',self.xw,self.yw
 
@@ -770,17 +771,17 @@ class LineSinkBase(Element):
     def layout(self):
         return 'line', [self.x1,self.x2], [self.y1,self.y2]
     
-class Well(WellBase):
+class DischargeWell(WellBase):
     '''Well with non-zero and potentially variable discharge through time'''
     def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layers=1,label=None):
         self.storeinput(inspect.currentframe())
-        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layers=layers,type='g',name='Well',label=label)
+        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layers=layers,type='g',name='DischargeWell',label=label)
         
-class MscreenWellNew(WellBase,WellBoreStorageEquation):
+class Well(WellBase,WellBoreStorageEquation):
     '''One or multi-screen well with wellbore storage'''
     def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layers=1,rc=None,wbstype='pumping',label=None):
         self.storeinput(inspect.currentframe())
-        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layers=layers,type='v',name='WellBoreStorageWell',label=label)
+        WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layers=layers,type='v',name='MscreenWell',label=label)
         if (rc is None) or (rc <= 0.0):
             self.rc = 0.0
         else:
@@ -833,7 +834,7 @@ class ZeroMscreenLineSink(LineSinkBase,MscreenEquation):
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
         self.vresfac = self.vres / (self.wv * self.L)  # Qv = (hn - hn-1) / vresfac[n-1]
         
-class MscreenWell(WellBase,MscreenEquation):
+class MscreenWellOld(WellBase,MscreenEquation):
     '''MscreenWell that varies through time. May be screened in multiple layers but heads are same in all screened layers'''
     def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layers=[1,2],label=None):
         assert len(layers) > 1, "TTim input error: number of layers for MscreenWell must be at least 2"
