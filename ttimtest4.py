@@ -7,7 +7,7 @@ from ttim import *
 ###################################################
 
 import os
-ttimdir = os.path.dirname( os.path.abspath( __file__ ) ) + '/'  # abspath includes filename. just dirname doesn't work when you are in the directory
+ttimdir = os.path.dirname( os.path.abspath( __file__ ) ) + os.sep  # abspath includes filename. just dirname doesn't work when you are in the directory
 
 # Figure
 plt.figure()
@@ -18,6 +18,7 @@ plt.draw()
 b = ax.get_position()
 ax = plt.axes(b)
 ax.patch.set_facecolor('None')
+#print 'b ',b  # Trouble with this on Windows
 
 for Ss in [1e-3,1e-4,1e-5,1e-6,1e-7]:
     kaq = 1.0 * np.ones(11)
@@ -36,7 +37,7 @@ for Ss in [1e-3,1e-4,1e-5,1e-6,1e-7]:
     ml.solve()
     h = ml.potential(10,0,t)
     h = -h*4*np.pi*T/10.0  # Make dimensionless
-    plot(log10(ts),log10(h[-1]),'+')
+    ax.plot(log10(ts),log10(h[-1]),'+')
     
 xlabel('$Tt/(Sr^2)$',fontsize=14)
 ylabel('$4\pi Ts/Q$',fontsize=14)

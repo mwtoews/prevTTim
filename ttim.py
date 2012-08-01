@@ -12,6 +12,8 @@ from cmath import tanh as cmath_tanh
 import inspect # Used for storing the input
 import os
 
+__version__ = 0.2
+
 class TimModel:
     def __init__(self,kaq=[1,1],Haq=[1,1],c=[np.nan,100],Saq=[0.3,0.003],Sll=[0],topboundary='imp',tmin=1,tmax=10,M=20):
         self.elementList = []
@@ -249,65 +251,74 @@ class TimModel:
             f.write( e.write() )
         f.close()
         
+        
+def param_maq(kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False):
+    kaq = np.atleast_1d(kaq).astype('d')
+    Naq = len(kaq)
+    z = np.atleast_1d(z).astype('d')
+    c = np.atleast_1d(c).astype('d')
+    Saq = np.atleast_1d(Saq).astype('d')
+    if len(Saq) == 1: Saq = Saq * np.ones(Naq)
+    Sll = np.atleast_1d(Sll).astype('d')
+    H = z[:-1] - z[1:]
+    assert np.all(H >= 0), 'Error: Not all layers thicknesses are non-negative' + str(H) 
+    if topboundary[:3] == 'imp':
+        assert len(z) == 2*Naq, 'Error: Length of z needs to be ' + str(2*Naq)
+        assert len(c) == Naq-1, 'Error: Length of c needs to be ' + str(Naq-1)
+        assert len(Saq) == Naq, 'Error: Length of Saq needs to be ' + str(Naq)
+        if len(Sll) == 1: Sll = Sll * np.ones(Naq-1)
+        assert len(Sll) == Naq-1, 'Error: Length of Sll needs to be ' + str(Naq-1)
+        Haq = H[::2]
+        Saq = Saq * Haq
+        if phreatictop: Saq[0] = Saq[0] / H[0]
+        Sll = Sll * H[1::2]
+        c = np.hstack((np.nan,c))
+        Sll = np.hstack((np.nan,Sll))
+    else: # leaky layers on top
+        assert len(z) == 2*Naq+1, 'Error: Length of z needs to be ' + str(2*Naq+1)
+        assert len(c) == Naq, 'Error: Length of c needs to be ' + str(Naq)
+        assert len(Saq) == Naq, 'Error: Length of Saq needs to be ' + str(Naq)
+        if len(Sll) == 1: Sll = Sll * np.ones(Naq)
+        assert len(Sll) == Naq, 'Error: Length of Sll needs to be ' + str(Naq)
+        Haq = H[1::2]
+        Saq = Saq * Haq
+        Sll = Sll * H[::2]
+        if phreatictop and (topboundary[:3]=='lea'): Sll[0] = Sll[0] / H[0]
+    return kaq,Haq,c,Saq,Sll
+        
 class ModelMaq(TimModel):
     def __init__(self,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False,tmin=1,tmax=10,M=20):
         self.storeinput(inspect.currentframe())
-        kaq = np.atleast_1d(kaq).astype('d')
-        Naq = len(kaq)
-        z = np.atleast_1d(z).astype('d')
-        c = np.atleast_1d(c).astype('d')
-        Saq = np.atleast_1d(Saq).astype('d')
-        if len(Saq) == 1: Saq = Saq * np.ones(Naq)
-        Sll = np.atleast_1d(Sll).astype('d')
-        H = z[:-1] - z[1:]
-        assert np.all(H >= 0), 'Error: Not all layers thicknesses are non-negative' + str(H) 
-        if topboundary[:3] == 'imp':
-            assert len(z) == 2*Naq, 'Error: Length of z needs to be ' + str(2*Naq)
-            assert len(c) == Naq-1, 'Error: Length of c needs to be ' + str(Naq-1)
-            assert len(Saq) == Naq, 'Error: Length of Saq needs to be ' + str(Naq)
-            if len(Sll) == 1: Sll = Sll * np.ones(Naq-1)
-            assert len(Sll) == Naq-1, 'Error: Length of Sll needs to be ' + str(Naq-1)
-            Haq = H[::2]
-            Saq = Saq * Haq
-            if phreatictop: Saq[0] = Saq[0] / H[0]
-            Sll = Sll * H[1::2]
-            c = np.hstack((np.nan,c))
-            Sll = np.hstack((np.nan,Sll))
-        else: # leaky layers on top
-            assert len(z) == 2*Naq+1, 'Error: Length of z needs to be ' + str(2*Naq+1)
-            assert len(c) == Naq, 'Error: Length of c needs to be ' + str(Naq)
-            assert len(Saq) == Naq, 'Error: Length of Saq needs to be ' + str(Naq)
-            if len(Sll) == 1: Sll = Sll * np.ones(Naq)
-            assert len(Sll) == Naq, 'Error: Length of Sll needs to be ' + str(Naq)
-            Haq = H[1::2]
-            Saq = Saq * Haq
-            Sll = Sll * H[::2]
-            if phreatictop and (topboundary[:3]=='lea'): Sll[0] = Sll[0] / H[0]
+        kaq,Haq,c,Saq,Sll = param_maq(kaq,z,c,Saq,Sll,topboundary,phreatictop)
         TimModel.__init__(self,kaq,Haq,c,Saq,Sll,topboundary,tmin,tmax,M)
         self.name = 'ModelMaq'
         
+def param_3d(kaq,z,Saq,kzoverkh,phreatictop):
+    kaq = np.atleast_1d(kaq).astype('d')
+    z = np.atleast_1d(z).astype('d')
+    Naq = len(z) - 1
+    if len(kaq) == 1: kaq = kaq * np.ones(Naq)
+    Saq = np.atleast_1d(Saq).astype('d')
+    if len(Saq) == 1: Saq = Saq * np.ones(Naq)
+    kzoverkh = np.atleast_1d(kzoverkh).astype('d')
+    if len(kzoverkh) == 1: kzoverkh = kzoverkh * np.ones(Naq)
+    H = z[:-1] - z[1:]
+    c = 0.5 * H[:-1] / ( kzoverkh[:-1] * kaq[:-1] ) + 0.5 * H[1:] / ( kzoverkh[1:] * kaq[1:] )
+    Saq = Saq * H
+    if phreatictop: Saq[0] = Saq[0] / H[0]
+    c = np.hstack((np.nan,c))
+    Sll = 1e-20 * np.ones(len(c))
+    return kaq,H,c,Saq,Sll
+
 class Model3D(TimModel):
     def __init__(self,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True,tmin=1,tmax=10,M=20):
         '''z must have the length of the number of layers + 1'''
         self.storeinput(inspect.currentframe())
-        kaq = np.atleast_1d(kaq).astype('d')
-        z = np.atleast_1d(z).astype('d')
-        Naq = len(z) - 1
-        if len(kaq) == 1: kaq = kaq * np.ones(Naq)
-        Saq = np.atleast_1d(Saq).astype('d')
-        if len(Saq) == 1: Saq = Saq * np.ones(Naq)
-        kzoverkh = np.atleast_1d(kzoverkh).astype('d')
-        if len(kzoverkh) == 1: kzoverkh = kzoverkh * np.ones(Naq)
-        H = z[:-1] - z[1:]
-        c = 0.5 * H[:-1] / ( kzoverkh[:-1] * kaq[:-1] ) + 0.5 * H[1:] / ( kzoverkh[1:] * kaq[1:] )
-        Saq = Saq * H
-        if phreatictop: Saq[0] = Saq[0] / H[0]
-        c = np.hstack((np.nan,c))
-        Sll = 1e-20 * np.ones(len(c))
+        kaq,H,c,Saq,Sll = param_3d(kaq,z,Saq,kzoverkh,phreatictop)
         TimModel.__init__(self,kaq,H,c,Saq,Sll,'imp',tmin,tmax,M)
         self.name = 'Model3D'
-        
-class Aquifer:
+    
+class AquiferData:
     def __init__(self,model,kaq,Haq,c,Saq,Sll,topboundary):
         self.model = model
         self.kaq = np.atleast_1d(kaq).astype('d')
@@ -321,9 +332,8 @@ class Aquifer:
         self.Sll[self.Sll<1e-20] = 1e-20 # Cannot be zero
         self.topboundary = topboundary[:3]
         self.D = self.T / self.Saq
-        self.inhomList = []
     def __repr__(self):
-        return 'Aquifer T: ' + str(self.T)
+        return 'Inhom T: ' + str(self.T)
     def initialize(self):
         '''
         eigval[Naq,Np]: Array with eigenvalues
@@ -346,12 +356,6 @@ class Aquifer:
             self.coef[:,:,i] = np.linalg.solve( v, b ).T
         self.lab = 1.0 / np.sqrt(self.eigval)
         self.lab2 = self.lab.copy(); self.lab2.shape = (self.Naq,self.model.Nin,self.model.Npin)
-    def findAquiferData(self,x,y):
-        return self
-    def headToPotential(self,h,pylayers):
-        return h * self.Tcol[pylayers]
-    def potentialToHead(self,p,pylayers):
-        return p / self.Tcol[pylayers]
     def compute_lab_eigvec(self,p):
         sqrtpSc = np.sqrt( p * self.Sll * self.c )
         a, b = np.zeros_like(sqrtpSc), np.zeros_like(sqrtpSc)
@@ -378,7 +382,50 @@ class Aquifer:
         A = np.diag(dm1,-1) + np.diag(d0,0) + np.diag(dp1,1)
         w,v = np.linalg.eig(A)
         return w,v
+    def headToPotential(self,h,pylayers):
+        return h * self.Tcol[pylayers]
+    def potentialToHead(self,pot,pylayers):
+        return pot / self.Tcol[pylayers]
+    def isInside(self,x,y):
+        print 'Must overload AquiferData.isInside method'
+        return True
+    
+class Aquifer(AquiferData):
+    def __init__(self,model,kaq,Haq,c,Saq,Sll,topboundary):
+        AquiferData.__init__(self,model,kaq,Haq,c,Saq,Sll,topboundary)
+        self.inhomList = []
+    def __repr__(self):
+        return 'Background Aquifer T: ' + str(self.T)
+    def findAquiferData(self,x,y):
+        rv = self
+        for aq in self.inhomList:
+            if aq.isInside(x,y):
+                rv = aq
+                break
+        return rv
+    
+class CircInhomData3D(AquiferData):
+    def __init__(self,model,xc,yc,Rc,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True):
+        kaq,H,c,Saq,Sll = param_3d(kaq,z,Saq,kzoverkh,phreatictop)
+        AquiferData.__init__(self,model,kaq,Haq,c,Saq,Sll,'imp')
+        self.xc, self.yc, self.Rc = float(xc), float(yc), float(Rc)
+        self.Rcsq = self.Rc**2
+    def isInside(self,x,y):
+        rv = False
+        if (x-self.xc)**2 + (y-self.yc)**2 < self.Rcsq: rv = True
+        return rv
 
+class CircInhomDataMaq(AquiferData):
+    def __init__(self,model,xc,yc,Rc,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False):
+        kaq,Haq,c,Saq,Sll = param_maq(kaq,z,c,Saq,Sll,topboundary,phreatictop)
+        AquiferData.__init__(self,model,kaq,Haq,c,Saq,Sll,topboundary)
+        self.xc, self.yc, self.Rc = float(xc), float(yc), float(Rc)
+        self.Rcsq = self.Rc**2
+    def isInside(self,x,y):
+        rv = False
+        if (x-self.xc)**2 + (y-self.yc)**2 < self.Rcsq: rv = True
+        return rv
+  
 class Element:
     def __init__(self, model, Nparam=1, Nunknowns=0, layers=1, tsandbc=[(0.0,0.0)], type='z', name='', label=None):
         '''Types of elements
@@ -613,7 +660,6 @@ class MscreenEquation:
                             mat[istart+i,ieq+istart+i,:] -= self.resfach[istart+i] * e.strengthinflayers[istart+i]
                             mat[istart+i,ieq+istart+i+1,:] += self.resfach[istart+i+1] * e.strengthinflayers[istart+i+1]
                             mat[istart+i,ieq+istart:ieq+istart+i+1,:] -= self.vresfac[istart+i] * e.strengthinflayers[istart+i]
-                            #mat[i,ieq:ieq+i+1,:] -= self.res[i] * disinf[i]
                         mat[istart+self.Nlayers-1,ieq+istart:ieq+istart+self.Nlayers,:] = 1.0
                     ieq += e.Nunknowns
             for i in range(self.model.Ngbc):
@@ -711,6 +757,20 @@ class WellBase(Element):
                         rv[:,i,j,:] = self.term2[:,i,j,:] * pot
         rv.shape = (self.Nparam,aq.Naq,self.model.Np)
         return rv
+    def disinf(self,x,y,aq=None):
+        '''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        qr = np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D')
+        if aq == self.aq:
+            r = np.sqrt( (x-self.xw)**2 + (y-self.yw)**2 )
+            pot = np.zeros(self.model.Npin,'D')
+            if r < self.rw: r = self.rw  # If at well, set to at radius
+            for i in range(self.aq.Naq):
+                for j in range(self.model.Nin):
+                    if r / abs(self.aq.lab2[i,j,0]) < self.Rzero:
+                        qr[:,i,j,:] = self.term2[:,i,j,:] * kv(1, r / self.aq.lab2[i,j,:]) / self.aq.lab2[i,j,:]
+        qr.shape = (self.Nparam,aq.Naq,self.model.Np)
+        return qr * (x-self.xw) / r, qr * (y-self.yw) / r
     def headinside(self,t,derivative=0):
         '''Returns head inside the well for the layers that the well is screened in'''
         return self.model.head(self.xc,self.yc,t,derivative=derivative)[self.pylayers] - self.resfach[:,np.newaxis] * self.strength(t,derivative=derivative)
@@ -776,7 +836,7 @@ class DischargeWell(WellBase):
     def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layers=1,label=None):
         self.storeinput(inspect.currentframe())
         WellBase.__init__(self,model,xw,yw,rw,tsandbc=tsandQ,res=res,layers=layers,type='g',name='DischargeWell',label=label)
-        
+    
 class Well(WellBase,WellBoreStorageEquation):
     '''One or multi-screen well with wellbore storage'''
     def __init__(self,model,xw=0,yw=0,rw=0.1,tsandQ=[(0.0,1.0)],res=0.0,layers=1,rc=None,wbstype='pumping',label=None):
@@ -1116,13 +1176,9 @@ def timlayout( ml, ax, color = 'k', lw = 0.5, style = '-' ):
 
 ##########################################
 
-#ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.01,tmax=10)
-#rw = 0.5
-#w = MscreenWellNew(ml,0,0,rw=rw,tsandQ=[(0.0,1.0)],res=1.0,rc=rw,layers=[1,2],wbstype='pumping')
-#ml.solve()
-#t = np.logspace(-2,1,10)
-#Q1 = w.strength(t)
-#Q2 = ml.head(0.1,0,t,derivative=1)*np.pi*rw**2
+ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=2)
+w = DischargeWell(ml,0,0,rw=0.1,tsandQ=[(0.0,1.0)],res=1.0,layers=[1])
+ml.solve()
 
 
 
@@ -1159,9 +1215,9 @@ def timlayout( ml, ax, color = 'k', lw = 0.5, style = '-' ):
 #ml.solve()
     
 ##ml = Model3D(kaq=2.0,z=[10,5,0],Saq=[.002,.001],kzoverkh=0.2,phreatictop=False,tmin=.1,tmax=10,M=15)
-ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=100,tmax=300,M=50)
-w = HeadWellNew(ml,0,0,.1,tsandh=[(0.0,1.0)],layers=1)
-ml.solve()
+#ml = ModelMaq(kaq=[10,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=100,tmax=300,M=50)
+#w = HeadWellNew(ml,0,0,.1,tsandh=[(0.0,1.0)],layers=1)
+#ml.solve()
 ##L1 = np.sqrt(10**2+5**2)
 ##ls1 = LineSink(ml,-10,-10,0,-5,tsandQ=[(0,.05*L1),(1,.02*L1)],res=1.0,layers=[1,2],label='mark1')
 #w = MscreenWell(ml,-5,-5,.1,[0,5],layers=[1,2])

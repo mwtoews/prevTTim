@@ -11,7 +11,7 @@ ml.solve()
 ############################################
 
 import os
-ttimdir = os.path.dirname( os.path.abspath( __file__ ) ) + '/'  # abspath includes filename. just dirname doesn't work when you are in the directory
+ttimdir = os.path.dirname( os.path.abspath( __file__ ) ) + os.sep  # abspath includes filename. just dirname doesn't work when you are in the directory
 
 t0 = logspace(-3,4,50)
 h0 = ml.head(.2,0,t0)

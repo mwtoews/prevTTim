@@ -1,39 +1,11 @@
-#!/usr/bin/env python
-# To use:
-#	   python setup.py build
-#	   python setup.py install
-#	   python setup.py install --prefix=...
-#	   python setup.py bdist --format=wininst
-#	   python setup.py bdist --format=rpm
-#	   python setup.py sdist --formats=gztar,zip
-#
-# To create Mac installer:
-# Install py2app
-# At terminal prompt:
-# bdist_mpkg setup.py build
-# Installer assumes that sitepackages are installed in sys.prefix+'/lib/python2.pyver/site-packages/ttim as is the case in EPD
-# pyver needs to be set to the correct value
+"""
+py2app build script for MyApplication
 
-import sys
-
-#if not hasattr(sys, 'version_info') or sys.version_info < (2,3,0,'alpha',0):
-#	raise SystemExit, "Python 2.6 or later required to build TTim"
-
-
-from distutils.core import setup, Extension
-
-# Specify Python version 2.pyver:
-pyver = 7
-
-setup (name = "ttim",
-	   extra_path = 'ttim',
-	   version = "0.1",
-	   author="Mark Bakker",
-	   author_email="mark.bakker@tudelft.nl",
-	   py_modules = ["ttim2"],
-# This trick might be original; I haven't found it anywhere.
-# The precompiled Fortran library is passed as a data file,
-# so that dist does not try and recompile on the destination machine
-       data_files = [(sys.prefix+'/lib/python2.'+str(pyver)+'/site-packages/ttim',["bessel.so","invlap.so"])]
-#	   ext_modules= [Extension("besselaes",["besselaes.f90","trianglemodule.c"])]
-	   )
+Usage:
+    python setup.py py2app
+"""
+from setuptools import setup
+setup(
+    app=["ttim.py"],
+setup_requires=["py2app"],
+)
