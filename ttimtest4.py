@@ -13,8 +13,9 @@ ttimdir = os.path.dirname( os.path.abspath( __file__ ) ) + os.sep  # abspath inc
 plt.figure()
 img = mpimg.imread(ttimdir+'neuman.png')
 ax = plt.imshow(np.flipud(img),origin='lower',extent=(-1,5,-2,1))
+pause(0.01) # Needed on Windows using PythonXY, else the bounding box is not recognized
 ax = ax.get_axes()
-plt.draw()
+#plt.draw()
 b = ax.get_position()
 ax = plt.axes(b)
 ax.patch.set_facecolor('None')
