@@ -1150,6 +1150,7 @@ contains
         exprange = exp(-cmplx(0,2,kind=8) * ang * nrange )
         anew = a1 * exprange
         bnew = (b1 - a1 * cmplx(0,2,kind=8) * ang) * exprange
+        !anew(0) = 0.d0
 
         zeta = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1) / biglab 
         zetabar = conjg(zeta)
@@ -1425,7 +1426,9 @@ contains
                 
         end do
         
+        !omega = bigy * biglab / (2.d0*pi*biglabcomplex**2) * omega !+ real( lapld_int_ho(x,y,z1,z2,order) )
         omega = bigy * biglab / (2.d0*pi*biglabcomplex**2) * omega !+ real( lapld_int_ho(x,y,z1,z2,order) )
+
         !omega = real( lapld_int_ho(x,y,z1,z2,order) )
 
         return
@@ -1535,13 +1538,18 @@ contains
         end do
         
         omegalap = lapld_int_ho_d1d2(x,y,z1,z2,order,d1,d2) / dcmplx(0.d0,1.d0)
+        omegalap = lapld_int_ho(x,y,z1,z2,order) / dcmplx(0.d0,1.d0)
         omegaom = besselldpart(x,y,z1,z2,lab,order,d1,d2)
         wdis = lapld_int_ho_wdis_d1d2(x,y,z1,z2,order,d1,d2)
         
-        rvz =    -biglab * bigy / (2.d0*pi*biglabcomplex**2) * (omega(1:order+1)/biglab - zetabar * omega(0:order)) + &
-                 biglab * omegaom / dcmplx(0.d0,2.d0)
-        rvzbar = -biglab * bigy / (2.d0*pi*biglabcomplex**2) * (omega(1:order+1)/biglab - zeta * omega(0:order)) - &
-                 biglab * omegaom / dcmplx(0.d0,2.d0)
+        rvz =    -biglab * bigy / (2.d0*pi*biglabcomplex**2) * (omega(1:order+1)/biglab - zetabar * omega(0:order))  &
+                 +biglab * omegaom / dcmplx(0.d0,2.d0)
+        rvzbar = -biglab * bigy / (2.d0*pi*biglabcomplex**2) * (omega(1:order+1)/biglab - zeta * omega(0:order))  &
+                 -biglab * omegaom / dcmplx(0.d0,2.d0)
+                 
+        !rvz =    biglab * omegaom / dcmplx(0.d0,2.d0)
+        !rvzbar = -biglab * omegaom / dcmplx(0.d0,2.d0)
+                 
         !qxqy(0:order) = -2.0 / L * ( rvz + rvzbar ) / biglab  ! As we need to take derivative w.r.t. z not zeta
         !qxqy(order+1:2*order+1) = -2.0 / L * dcmplx(0,1) * (rvz-rvzbar) / biglab
         !
@@ -1555,8 +1563,11 @@ contains
         qx = -2.0 / L * ( rvz + rvzbar ) / biglab  ! As we need to take derivative w.r.t. z not zeta
         qy = -2.0 / L * dcmplx(0,1) * (rvz-rvzbar) / biglab
 
-        qx = qx - 2.0 / L / biglabcomplex**2 * azero * ( omegalap + conjg(omegalap) )
-        qy = qy - 2.0 / L / biglabcomplex**2 * azero * dcmplx(0,1) * (omegalap - conjg(omegalap))
+        print *,'azero ',azero
+        print *,'biglab ',biglab
+        print *,'biga ',biga
+        qx = qx - 2.0 / L / biglabcomplex**2 * azero * ( omegalap + conjg(omegalap) )        
+        qy = qy - 2.0 / L / biglabcomplex**2 * azero * dcmplx(0.d0,1.d0) * (omegalap - conjg(omegalap))
                                   
         !qx = qx + real(wdis * (z2-z1) / L)
         !qy = qy - aimag(wdis * (z2-z1) / L)
@@ -1564,7 +1575,7 @@ contains
         print *,'angz ',angz
         qxqy(0:order) = qx * cos(angz) - qy * sin(angz) + real(wdis)  ! wdis already includes the correct rotation
         qxqy(order+1:2*order+1) = qx * sin(angz) + qy * cos(angz) - aimag(wdis)
-
+        print *,'qxqy ',qxqy
         return
     end function besselld_int_ho_qxqy
     
@@ -1873,9 +1884,12 @@ program besseltest
     z1 = dcmplx(-2.d0,0.d0)
     z2 = dcmplx(2.d0,0.d0)
     x=2.d0
-    y = 2.d0
+    y = 1.d0
     order = 0
     om0 = besselld_int_ho(x,y,z1,z2,lab,order,-1.d0,1.d0)
+    print *,'om int   ',om0
+    om0 = besselld_gauss_ho(x,y,z1,z2,lab,order)
+    print *,'om gauss ',om0
     om1 = besselld_int_ho(x+d,y,z1,z2,lab,order,-1.d0,1.d0)
     om2 = besselld_int_ho(x-d,y,z1,z2,lab,order,-1.d0,1.d0)
     om3 = besselld_int_ho(x,y+d,z1,z2,lab,order,-1.d0,1.d0)
