@@ -504,134 +504,6 @@ contains
        
     end function lapls_int_ho
 
-    function lapld_int_ho(x,y,z1,z2,order) result(omega)
-        ! Near field only
-        implicit none
-        integer, intent(in) :: order
-        real(kind=8), intent(in) :: x,y
-        complex(kind=8), intent(in) :: z1,z2
-        complex(kind=8), dimension(0:order) :: omega, qm
-        integer :: m, n
-        real(kind=8) :: L
-        complex(kind=8) :: z, zplus1, zmin1
-    
-        L = abs(z2-z1)
-        z = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1)
-        zplus1 = z + 1.d0; zmin1 = z - 1.d0
-        ! Not sure if this gives correct answer at corner point (z also appears in qm); should really be caught in code that calls this function
-        if  (abs(zplus1) < tiny) zplus1 = tiny
-        if  (abs(zmin1) < tiny) zmin1 = tiny
-
-        omega(0) = cdlog(zmin1/zplus1)
-        do n=1,order
-            omega(n) = z * omega(n-1)
-        end do
-        
-        qm(0) = 0.d0
-        if (order > 0) qm(1) = 2.d0
-        do m=3,order,2
-            qm(m) = qm(m-2) * z * z + 2.d0 / m
-        end do
-        do m=2,order,2
-            qm(m) = qm(m-1) * z 
-        end do
-
-        omega = 1.d0 / (dcmplx(0.d0,2.d0) * pi) * ( omega + qm )
-    end function lapld_int_ho
-    
-    function besselld_int_ho(x,y,z1,z2,lab,order) result(omega)
-        implicit none
-        integer, intent(in) :: order
-        real(kind=8), intent(in) :: x,y
-        complex(kind=8), intent(in) :: z1,z2,lab
-        complex(kind=8), dimension(0:order) :: omega
-        real(kind=8) :: biglab, biga, L, ang, tol, bigy
-        complex(kind=8) :: zeta, zetabar, log1, log2, term1, term2, d1minzeta, d2minzeta, bigz
-        complex(kind=8) :: cm, biglabcomplex
-        complex(kind=8), dimension(0:20) :: zminzbar, anew, bnew, exprange
-        complex(kind=8), dimension(0:20,0:20) :: gamnew, gam2
-        complex(kind=8), dimension(0:40) :: alpha, beta, alpha2
-        complex(kind=8), dimension(0:50) :: alphanew, betanew, alphanew2 ! Order fixed to 10
-
-        integer :: m, n, p
-                
-        L = abs(z2-z1)
-        bigz = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1)
-        bigy = aimag(bigz)
-        biga = abs(lab)
-        ang = atan2(aimag(lab),real(lab))
-        biglab = 2.d0 * biga / L
-        biglabcomplex = 2.0 * lab / L
-        
-        tol = 1.d-12
-        
-        exprange = exp(-cmplx(0,2,kind=8) * ang * nrange )
-        anew = a1 * exprange
-        bnew = (b1 - a1 * cmplx(0,2,kind=8) * ang) * exprange
-
-        zeta = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1) / biglab 
-        zetabar = conjg(zeta)
-        zminzbar(20) = 1.d0
-        do n = 1,20
-            zminzbar(20-n) = zminzbar(21-n) * (zeta-zetabar)  ! Ordered from high power to low power
-        end do
-        gamnew = gam
-        do n = 0,20
-            gamnew(n,0:n) = gamnew(n,0:n) * zminzbar(20-n:20)
-            gam2(n,0:n) = conjg(gamnew(n,0:n))
-        end do
-        
-        alpha(0:40) = 0.d0
-        beta(0:40) = 0.d0
-        alpha2(0:40) = 0.d0
-        alpha(0) = anew(0)
-        beta(0) = bnew(0)
-        alpha2(0) = anew(0)
-        do n = 1,20
-            alpha(n:2*n) = alpha(n:2*n) + anew(n) * gamnew(n,0:n)
-            beta(n:2*n)  = beta(n:2*n)  + bnew(n) * gamnew(n,0:n)
-            alpha2(n:2*n) = alpha2(n:2*n) + anew(n) * gam2(n,0:n)
-        end do
-        
-        d1minzeta = -1.d0/biglab - zeta
-        d2minzeta = 1.d0/biglab - zeta
-        if (abs(d1minzeta) < tol) d1minzeta = d1minzeta + cmplx(tol,0.d0,kind=8)
-        if (abs(d2minzeta) < tol) d2minzeta = d2minzeta + cmplx(tol,0.d0,kind=8)
-        log1 = log(d1minzeta)
-        log2 = log(d2minzeta)
-        
-        do p = 0,order
-        
-            alphanew(0:40+p) = 0.d0
-            betanew(0:40+p) = 0.d0
-            alphanew2(0:40+p) = 0.d0
-            do m = 0,p
-                cm = biglab**p * gam(p,m) * zeta**(p-m)
-                alphanew(m:40+m) = alphanew(m:40+m) + cm * alpha(0:40)
-                betanew(m:40+m)  = betanew(m:40+m) + cm * beta(0:40)
-                cm = biglab**p * gam(p,m) * zetabar**(p-m)
-                alphanew2(m:40+m) = alphanew2(m:40+m) + cm * alpha2(0:40)
-            end do
-            
-            omega(p) = 0.d0
-            term1 = 1.d0
-            term2 = 1.d0
-            do n = 0,40
-                term1 = term1 * d1minzeta
-                term2 = term2 * d2minzeta
-                omega(p) = omega(p) + ( alphanew(n) * log2 - alphanew(n) / (n+1) + betanew(n) ) * term2 / (n+1)
-                omega(p) = omega(p) - ( alphanew(n) * log1 - alphanew(n) / (n+1) + betanew(n) ) * term1 / (n+1)
-                omega(p) = omega(p) + ( alphanew2(n) * conjg(log2) - alphanew2(n) / (n+1) ) * conjg(term2) / (n+1)
-                omega(p) = omega(p) - ( alphanew2(n) * conjg(log1) - alphanew2(n) / (n+1) ) * conjg(term1) / (n+1)
-            end do
-                
-        end do
-        
-        omega = bigy * biglab / (2.d0*pi*biglabcomplex**2) * omega + real( lapld_int_ho(x,y,z1,z2,order) )
-
-        return
-    end function besselld_int_ho
-    
     function bessellsreal(x,y,x1,y1,x2,y2,lab) result(phi)
         implicit none
         real(kind=8), intent(in) :: x,y,x1,y1,x2,y2,lab
@@ -1001,7 +873,7 @@ contains
             omega(p) = 0.d0
             term1 = 1.d0
             term2 = 1.d0
-            do n = 0,40
+            do n = 0,40+p
                 term1 = term1 * d1minzeta
                 term2 = term2 * d2minzeta
                 omega(p) = omega(p) + ( alphanew(n) * log2 - alphanew(n) / (n+1) + betanew(n) ) * term2 / (n+1)
@@ -1073,38 +945,6 @@ contains
         return
     end function bessells_gauss_ho
     
-    function besselld_gauss_ho(x,y,z1,z2,lab,order) result(omega)
-        implicit none
-        integer, intent(in) :: order
-        real(kind=8), intent(in) :: x,y
-        complex(kind=8), intent(in) :: z1,z2
-        complex(kind=8), intent(in) :: lab
-        complex(kind=8), dimension(0:order) :: omega
-        integer :: n, p
-        real(kind=8) :: L, x0, r
-        complex(kind=8) :: bigz, biglab
-        complex(kind=8), dimension(8) :: k1overr
-        
-        L = abs(z2-z1)
-        biglab = 2.d0 * lab / L
-        bigz = (2.d0 * cmplx(x,y,kind=8) - (z1+z2) ) / (z2-z1)
-        do n = 1,8
-            x0 = real(bigz) - xg(n)
-            r = sqrt( x0**2 + aimag(bigz)**2 )
-            k1overr(n) = besselk1( x0, aimag(bigz), biglab ) / r
-            !k1overr(n) = 1.d0 / r**2
-        end do
-        do p = 0,order
-            omega(p) = cmplx(0.d0,0.d0,kind=8)
-            do n = 1,8
-                omega(p) = omega(p) + wg(n) * xg(n)**p * k1overr(n)
-            end do
-            omega(p) = aimag(bigz)/(2.d0*pi*biglab) * omega(p)
-            !omega(p) = aimag(bigz)/(2.d0*pi) * omega(p)
-        end do
-        return
-    end function besselld_gauss_ho
-    
     function bessells(x,y,z1,z2,lab) result(omega)
         implicit none
         real(kind=8), intent(in) :: x,y
@@ -1155,6 +995,621 @@ contains
             omega(n) = bessells(x,y,z1,z2,lab(n))
         end do
     end subroutine bessellsv
+    
+!!!!!!! Line Doublet Functions    
+    function lapld_int_ho(x,y,z1,z2,order) result(omega)
+        ! Near field only
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y
+        complex(kind=8), intent(in) :: z1,z2
+        complex(kind=8), dimension(0:order) :: omega, qm
+        integer :: m, n
+        real(kind=8) :: L
+        complex(kind=8) :: z, zplus1, zmin1
+    
+        L = abs(z2-z1)
+        z = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1)
+        zplus1 = z + 1.d0; zmin1 = z - 1.d0
+        ! Not sure if this gives correct answer at corner point (z also appears in qm); should really be caught in code that calls this function
+        if  (abs(zplus1) < tiny) zplus1 = tiny
+        if  (abs(zmin1) < tiny) zmin1 = tiny
+
+        omega(0) = cdlog(zmin1/zplus1)
+        do n=1,order
+            omega(n) = z * omega(n-1)
+        end do
+        
+        qm(0) = 0.d0
+        if (order > 0) qm(1) = 2.d0
+        do m=3,order,2
+            qm(m) = qm(m-2) * z * z + 2.d0 / m
+        end do
+        do m=2,order,2
+            qm(m) = qm(m-1) * z 
+        end do
+
+        omega = 1.d0 / (dcmplx(0.d0,2.d0) * pi) * ( omega + qm )
+    end function lapld_int_ho
+    
+    function lapld_int_ho_d1d2(x,y,z1,z2,order,d1,d2) result(omega)
+        ! Near field only
+        ! Returns integral from d1 to d2 along real axis while strength is still Delta^order from -1 to +1
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y,d1,d2
+        complex(kind=8), intent(in) :: z1,z2
+        complex(kind=8), dimension(0:order) :: omega, omegac
+        integer :: n, m
+        real(kind=8) :: xp, yp, dc, fac
+        complex(kind=8) :: z1p,z2p,bigz1,bigz2
+        bigz1 = dcmplx(d1,0.d0)
+        bigz2 = dcmplx(d2,0.d0)
+        z1p = 0.5d0 * (z2-z1) * bigz1 + 0.5d0 * (z1+z2)
+        z2p = 0.5d0 * (z2-z1) * bigz2 + 0.5d0 * (z1+z2)
+        omegac = lapld_int_ho(x,y,z1p,z2p,order)
+        dc = (d1+d2) / (d2-d1)
+        omega(0:order) = 0.d0
+        do n = 0, order
+            do m = 0, n
+                omega(n) = omega(n) + gam(n,m) * dc**(n-m) * omegac(m)
+            enddo
+            omega(n) = ( 0.5*(d2-d1) )**n * omega(n)
+        end do
+    end function lapld_int_ho_d1d2
+    
+    function lapld_int_ho_wdis(x,y,z1,z2,order) result(wdis)
+        ! Near field only
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y
+        complex(kind=8), intent(in) :: z1,z2
+        complex(kind=8), dimension(0:order) :: wdis
+        complex(kind=8), dimension(0:10) :: qm  ! Max order is 10
+        integer :: m, n
+        complex(kind=8) :: z, zplus1, zmin1, term1, term2, zterm
+    
+        z = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1)
+        zplus1 = z + 1.d0; zmin1 = z - 1.d0
+        ! Not sure if this gives correct answer at corner point (z also appears in qm); should really be caught in code that calls this function
+        if  (abs(zplus1) < tiny) zplus1 = tiny
+        if  (abs(zmin1) < tiny) zmin1 = tiny
+        
+        qm(0:1) = 0.d0
+        do m = 2,order
+            qm(m) = 0.d0
+            do n=1,m/2
+                qm(m) = qm(m) + (m-2*n+1) * z**(m-2*n) / (2*n-1)
+            end do
+        end do
+        
+        term1 = 1.d0 / zmin1 - 1.d0 / zplus1
+        term2 = cdlog(zmin1/zplus1)
+        wdis(0) = term1
+        zterm = dcmplx(1.d0,0.d0)
+        do m = 1,order
+            wdis(m) = m * zterm * term2 + z * zterm * term1 + 2.d0 * qm(m)
+            zterm = zterm * z
+        end do
+        
+        wdis = - wdis / (pi*dcmplx(0.d0,1.d0)*(z2-z1))
+    end function lapld_int_ho_wdis
+    
+    function lapld_int_ho_wdis_d1d2(x,y,z1,z2,order,d1,d2) result(wdis)
+        ! Near field only
+        ! Returns integral from d1 to d2 along real axis while strength is still Delta^order from -1 to +1
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y,d1,d2
+        complex(kind=8), intent(in) :: z1,z2
+        complex(kind=8), dimension(0:order) :: wdis, wdisc
+        integer :: n, m
+        real(kind=8) :: xp, yp, dc, fac
+        complex(kind=8) :: z1p,z2p,bigz1,bigz2
+        bigz1 = dcmplx(d1,0.d0)
+        bigz2 = dcmplx(d2,0.d0)
+        z1p = 0.5d0 * (z2-z1) * bigz1 + 0.5d0 * (z1+z2)
+        z2p = 0.5d0 * (z2-z1) * bigz2 + 0.5d0 * (z1+z2)
+        wdisc = lapld_int_ho_wdis(x,y,z1p,z2p,order)
+        dc = (d1+d2) / (d2-d1)
+        wdis(0:order) = 0.d0
+        do n = 0, order
+            do m = 0, n
+                wdis(n) = wdis(n) + gam(n,m) * dc**(n-m) * wdisc(m)
+            enddo
+            wdis(n) = ( 0.5*(d2-d1) )**n * wdis(n)
+        end do
+    end function lapld_int_ho_wdis_d1d2
+    
+    function besselld_int_ho(x,y,z1,z2,lab,order,d1,d2) result(omega)
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y,d1,d2
+        complex(kind=8), intent(in) :: z1,z2,lab
+        complex(kind=8), dimension(0:order) :: omega
+        real(kind=8) :: biglab, biga, L, ang, tol, bigy
+        complex(kind=8) :: zeta, zetabar, log1, log2, term1, term2, d1minzeta, d2minzeta, bigz
+        complex(kind=8) :: cm, biglabcomplex
+        complex(kind=8), dimension(0:20) :: zminzbar, anew, bnew, exprange
+        complex(kind=8), dimension(0:20,0:20) :: gamnew, gam2
+        complex(kind=8), dimension(0:40) :: alpha, beta, alpha2
+        complex(kind=8), dimension(0:50) :: alphanew, betanew, alphanew2 ! Order fixed to 10
+
+        integer :: m, n, p
+                
+        L = abs(z2-z1)
+        bigz = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1)
+        bigy = aimag(bigz)
+        biga = abs(lab)
+        ang = atan2(aimag(lab),real(lab))
+        biglab = 2.d0 * biga / L
+        biglabcomplex = 2.0 * lab / L
+        
+        tol = 1.d-12
+        
+        exprange = exp(-cmplx(0,2,kind=8) * ang * nrange )
+        anew = a1 * exprange
+        bnew = (b1 - a1 * cmplx(0,2,kind=8) * ang) * exprange
+
+        zeta = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1) / biglab 
+        zetabar = conjg(zeta)
+        zminzbar(20) = 1.d0
+        do n = 1,20
+            zminzbar(20-n) = zminzbar(21-n) * (zeta-zetabar)  ! Ordered from high power to low power
+        end do
+        gamnew = gam
+        do n = 0,20
+            gamnew(n,0:n) = gamnew(n,0:n) * zminzbar(20-n:20)
+            gam2(n,0:n) = conjg(gamnew(n,0:n))
+        end do
+        
+        alpha(0:40) = 0.d0
+        beta(0:40) = 0.d0
+        alpha2(0:40) = 0.d0
+        alpha(0) = anew(0)
+        beta(0) = bnew(0)
+        alpha2(0) = anew(0)
+        do n = 1,20
+            alpha(n:2*n) = alpha(n:2*n) + anew(n) * gamnew(n,0:n)
+            beta(n:2*n)  = beta(n:2*n)  + bnew(n) * gamnew(n,0:n)
+            alpha2(n:2*n) = alpha2(n:2*n) + anew(n) * gam2(n,0:n)
+        end do
+        
+        d1minzeta = d1/biglab - zeta
+        d2minzeta = d2/biglab - zeta
+        !d1minzeta = -1.d0/biglab - zeta
+        !d2minzeta = 1.d0/biglab - zeta
+        if (abs(d1minzeta) < tol) d1minzeta = d1minzeta + cmplx(tol,0.d0,kind=8)
+        if (abs(d2minzeta) < tol) d2minzeta = d2minzeta + cmplx(tol,0.d0,kind=8)
+        log1 = log(d1minzeta)
+        log2 = log(d2minzeta)
+        
+        do p = 0,order
+        
+            alphanew(0:40+p) = 0.d0
+            betanew(0:40+p) = 0.d0
+            alphanew2(0:40+p) = 0.d0
+            do m = 0,p
+                cm = biglab**p * gam(p,m) * zeta**(p-m)
+                alphanew(m:40+m) = alphanew(m:40+m) + cm * alpha(0:40)
+                betanew(m:40+m)  = betanew(m:40+m) + cm * beta(0:40)
+                cm = biglab**p * gam(p,m) * zetabar**(p-m)
+                alphanew2(m:40+m) = alphanew2(m:40+m) + cm * alpha2(0:40)
+            end do
+            
+            omega(p) = 0.d0
+            term1 = 1.d0
+            term2 = 1.d0
+            do n = 0,40
+                term1 = term1 * d1minzeta
+                term2 = term2 * d2minzeta
+                omega(p) = omega(p) + ( alphanew(n) * log2 - alphanew(n) / (n+1) + betanew(n) ) * term2 / (n+1)
+                omega(p) = omega(p) - ( alphanew(n) * log1 - alphanew(n) / (n+1) + betanew(n) ) * term1 / (n+1)
+                omega(p) = omega(p) + ( alphanew2(n) * conjg(log2) - alphanew2(n) / (n+1) ) * conjg(term2) / (n+1)
+                omega(p) = omega(p) - ( alphanew2(n) * conjg(log1) - alphanew2(n) / (n+1) ) * conjg(term1) / (n+1)
+            end do
+                
+        end do
+        
+!        omega = bigy * biglab / (2.d0*pi*biglabcomplex**2) * omega + real( lapld_int_ho_d1d2(x,y,z1,z2,order,d1,d2) )
+        omega = bigy * biglab / (2.d0*pi*biglabcomplex**2) * omega + real( lapld_int_ho_d1d2(x,y,z1,z2,order,d1,d2) )
+
+
+        return
+    end function besselld_int_ho
+    
+    function besselld_gauss_ho(x,y,z1,z2,lab,order) result(omega)
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y
+        complex(kind=8), intent(in) :: z1,z2
+        complex(kind=8), intent(in) :: lab
+        complex(kind=8), dimension(0:order) :: omega
+        integer :: n, p
+        real(kind=8) :: L, x0, r
+        complex(kind=8) :: bigz, biglab
+        complex(kind=8), dimension(8) :: k1overr
+        
+        L = abs(z2-z1)
+        biglab = 2.d0 * lab / L
+        bigz = (2.d0 * cmplx(x,y,kind=8) - (z1+z2) ) / (z2-z1)
+        do n = 1,8
+            x0 = real(bigz) - xg(n)
+            r = sqrt( x0**2 + aimag(bigz)**2 )
+            k1overr(n) = besselk1( x0, aimag(bigz), biglab ) / r
+        end do
+        do p = 0,order
+            omega(p) = cmplx(0.d0,0.d0,kind=8)
+            do n = 1,8
+                omega(p) = omega(p) + wg(n) * xg(n)**p * k1overr(n)
+            end do
+            omega(p) = aimag(bigz)/(2.d0*pi*biglab) * omega(p)
+        end do
+        return
+    end function besselld_gauss_ho
+    
+    function besselld_gauss_ho_d1d2(x,y,z1,z2,lab,order,d1,d2) result(omega)
+        ! Returns integral from d1 to d2 along real axis while strength is still Delta^order from -1 to +1
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y,d1,d2
+        complex(kind=8), intent(in) :: z1,z2,lab
+        complex(kind=8), dimension(0:order) :: omega, omegac
+        integer :: n, m
+        real(kind=8) :: xp, yp, dc, fac
+        complex(kind=8) :: z1p,z2p,bigz1,bigz2
+        bigz1 = dcmplx(d1,0.d0)
+        bigz2 = dcmplx(d2,0.d0)
+        z1p = 0.5d0 * (z2-z1) * bigz1 + 0.5d0 * (z1+z2)
+        z2p = 0.5d0 * (z2-z1) * bigz2 + 0.5d0 * (z1+z2)
+        omegac = besselld_gauss_ho(x,y,z1p,z2p,lab,order)
+        dc = (d1+d2) / (d2-d1)
+        omega(0:order) = 0.d0
+        do n = 0, order
+            do m = 0, n
+                omega(n) = omega(n) + gam(n,m) * dc**(n-m) * omegac(m)
+            enddo
+            omega(n) = ( 0.5*(d2-d1) )**n * omega(n)
+        end do
+    end function besselld_gauss_ho_d1d2
+    
+    function besselld(x,y,z1,z2,lab,order) result(omega)
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y
+        complex(kind=8), intent(in) :: z1,z2
+        complex(kind=8), intent(in) :: lab
+        complex(kind=8), dimension(0:order) :: omega
+        
+        integer :: Nls, n
+        real(kind=8) :: Lnear, L, d1, d2, delta
+        complex(kind=8) :: z, delz, za, zb
+        
+        Lnear = 3.d0
+        z = cmplx(x,y,kind=8)
+        omega(0:order) = cmplx(0.d0,0.d0,kind=8)
+        L = abs(z2-z1)
+        print *,'Lnear*abs(lab) ',Lnear*abs(lab)
+        if ( L < Lnear*abs(lab) ) then  ! No need to break integral up
+            if ( abs( z - 0.5d0*(z1+z2) ) < 0.5d0 * Lnear * L ) then  ! Do integration
+                omega = besselld_int_ho(x,y,z1,z2,lab,order,-1.d0,1.d0)
+            else
+                omega = bessells_gauss_ho(x,y,z1,z2,lab,order)
+            end if
+        else  ! Break integral up in parts
+            Nls = ceiling( L / (Lnear*abs(lab)) )
+            print *,'NLS ',Nls
+            delta = 2.d0 / Nls
+            delz = (z2-z1)/Nls
+            L = abs(delz)
+            do n = 1,Nls
+                za = z1 + (n-1) * delz
+                zb = z1 + n * delz
+                d1 = -1.d0 + (n-1) * delta
+                d2 = -1.d0 + n * delta
+                if ( abs( z - 0.5d0*(za+zb) ) < 0.5d0 * Lnear * L ) then  ! Do integration
+                    omega = omega + besselld_int_ho(x,y,z1,z2,lab,order,d1,d2)
+                else
+                    omega = omega + besselld_gauss_ho_d1d2(x,y,z1,z2,lab,order,d1,d2)
+                end if
+            end do
+        end if
+        return
+    end function besselld
+    
+    function besselldv(x,y,z1,z2,lab,nlab,order) result(omega)
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y
+        complex(kind=8), intent(in) :: z1,z2
+        integer, intent(in) :: nlab
+        complex(kind=8), dimension(nlab), intent(in) :: lab
+        complex(kind=8), dimension(nlab*(order+1)) :: omega
+        integer :: n
+        do n = 1,nlab
+            omega((n-1)*nlab:n*nlab) = besselld(x,y,z1,z2,lab(n),order)
+        end do
+    end function besselldv
+    
+    function besselldpart(x,y,z1,z2,lab,order,d1,d2) result(omega)
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y,d1,d2
+        complex(kind=8), intent(in) :: z1,z2,lab
+        complex(kind=8), dimension(0:order) :: omega
+        real(kind=8) :: biglab, biga, L, ang, tol, bigy
+        complex(kind=8) :: zeta, zetabar, log1, log2, term1, term2, d1minzeta, d2minzeta, bigz
+        complex(kind=8) :: cm, biglabcomplex
+        complex(kind=8), dimension(0:20) :: zminzbar, anew, bnew, exprange
+        complex(kind=8), dimension(0:20,0:20) :: gamnew, gam2
+        complex(kind=8), dimension(0:40) :: alpha, beta, alpha2
+        complex(kind=8), dimension(0:50) :: alphanew, betanew, alphanew2 ! Order fixed to 10
+
+        integer :: m, n, p
+                
+        L = abs(z2-z1)
+        bigz = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1)
+        bigy = aimag(bigz)
+        biga = abs(lab)
+        ang = atan2(aimag(lab),real(lab))
+        biglab = 2.d0 * biga / L
+        biglabcomplex = 2.0 * lab / L
+        
+        tol = 1.d-12
+        
+        exprange = exp(-cmplx(0,2,kind=8) * ang * nrange )
+        anew = a1 * exprange
+        bnew = (b1 - a1 * cmplx(0,2,kind=8) * ang) * exprange
+        !anew(0) = 0.d0
+        !print *,'anew0 ',anew(0)
+        !anew(1:20) = 0.d0
+        !bnew(0:20) = 0.d0
+
+        zeta = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1) / biglab 
+        zetabar = conjg(zeta)
+        zminzbar(20) = 1.d0
+        do n = 1,20
+            zminzbar(20-n) = zminzbar(21-n) * (zeta-zetabar)  ! Ordered from high power to low power
+        end do
+        gamnew = gam
+        do n = 0,20
+            gamnew(n,0:n) = gamnew(n,0:n) * zminzbar(20-n:20)
+            gam2(n,0:n) = conjg(gamnew(n,0:n))
+        end do
+        
+        alpha(0:40) = 0.d0
+        beta(0:40) = 0.d0
+        alpha2(0:40) = 0.d0
+        alpha(0) = anew(0)
+        beta(0) = bnew(0)
+        alpha2(0) = anew(0)
+        do n = 1,20
+            alpha(n:2*n) = alpha(n:2*n) + anew(n) * gamnew(n,0:n)
+            beta(n:2*n)  = beta(n:2*n)  + bnew(n) * gamnew(n,0:n)
+            alpha2(n:2*n) = alpha2(n:2*n) + anew(n) * gam2(n,0:n)
+        end do
+
+        d1minzeta = d1/biglab - zeta
+        d2minzeta = d2/biglab - zeta
+        !d1minzeta = -1.d0/biglab - zeta
+        !d2minzeta = 1.d0/biglab - zeta
+        if (abs(d1minzeta) < tol) d1minzeta = d1minzeta + cmplx(tol,0.d0,kind=8)
+        if (abs(d2minzeta) < tol) d2minzeta = d2minzeta + cmplx(tol,0.d0,kind=8)
+        log1 = log(d1minzeta)
+        log2 = log(d2minzeta)
+        
+        do p = 0,order
+        
+            alphanew(0:40+p) = 0.d0
+            betanew(0:40+p) = 0.d0
+            alphanew2(0:40+p) = 0.d0
+            do m = 0,p
+                cm = biglab**p * gam(p,m) * zeta**(p-m)
+                alphanew(m:40+m) = alphanew(m:40+m) + cm * alpha(0:40)
+                betanew(m:40+m)  = betanew(m:40+m) + cm * beta(0:40)
+                cm = biglab**p * gam(p,m) * zetabar**(p-m)
+                alphanew2(m:40+m) = alphanew2(m:40+m) + cm * alpha2(0:40)
+            end do
+            
+            omega(p) = 0.d0
+            term1 = 1.d0
+            term2 = 1.d0
+            do n = 0,40+p
+                term1 = term1 * d1minzeta
+                term2 = term2 * d2minzeta
+                omega(p) = omega(p) + ( alphanew(n) * log2 - alphanew(n) / (n+1) + betanew(n) ) * term2 / (n+1)
+                omega(p) = omega(p) - ( alphanew(n) * log1 - alphanew(n) / (n+1) + betanew(n) ) * term1 / (n+1)
+                omega(p) = omega(p) + ( alphanew2(n) * conjg(log2) - alphanew2(n) / (n+1) ) * conjg(term2) / (n+1)
+                omega(p) = omega(p) - ( alphanew2(n) * conjg(log1) - alphanew2(n) / (n+1) ) * conjg(term1) / (n+1)
+            end do
+                
+        end do
+        
+        omega = bigy * biglab / (2.d0*pi*biglabcomplex**2) * omega !+ real( lapld_int_ho(x,y,z1,z2,order) )
+        !omega = real( lapld_int_ho(x,y,z1,z2,order) )
+
+        return
+    end function besselldpart
+    
+    function besselld_int_ho_qxqy(x,y,z1,z2,lab,order,d1,d2) result(qxqy)
+        implicit none
+        integer, intent(in) :: order
+        real(kind=8), intent(in) :: x,y,d1,d2
+        complex(kind=8), intent(in) :: z1,z2,lab
+        complex(kind=8), dimension(0:2*order+1) :: qxqy
+        complex(kind=8), dimension(0:order) :: rvz, rvzbar
+        real(kind=8) :: biglab, biga, L, ang, angz, tol, bigy
+        complex(kind=8) :: zeta, zetabar, log1, log2, term1, term2, d1minzeta, d2minzeta, bigz
+        complex(kind=8) :: cm, biglabcomplex, azero
+        complex(kind=8), dimension(0:20) :: zminzbar, anew, bnew, exprange
+        complex(kind=8), dimension(0:20,0:20) :: gamnew, gam2
+        complex(kind=8), dimension(0:40) :: alpha, beta, alpha2
+        complex(kind=8), dimension(0:51) :: alphanew, betanew, alphanew2 ! Order fixed to 10
+        complex(kind=8), dimension(0:order) :: omegalap, omegaom, wdis, qx, qy ! To store intermediate result
+        complex(kind=8), dimension(0:order+1) :: omega ! To store intermediate result
+
+
+        integer :: m, n, p
+                
+        L = abs(z2-z1)
+        bigz = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1)
+        bigy = aimag(bigz)
+        biga = abs(lab)
+        ang = atan2(aimag(lab),real(lab))
+        angz = atan2(aimag(z2-z1),real(z2-z1))
+        biglab = 2.d0 * biga / L
+        biglabcomplex = 2.0 * lab / L
+        
+        tol = 1.d-12
+        
+        exprange = exp(-cmplx(0,2,kind=8) * ang * nrange )
+        anew = a1 * exprange
+        bnew = (b1 - a1 * cmplx(0,2,kind=8) * ang) * exprange
+        azero = anew(0)
+
+        do n = 0,19
+            bnew(n) = (n+1)*bnew(n+1) + anew(n+1)
+            anew(n) = (n+1)*anew(n+1)
+        end do
+        anew(20) = 0.d0  ! This is a bit lazy
+        bnew(20) = 0.d0
+
+        zeta = (2.d0 * dcmplx(x,y) - (z1+z2) ) / (z2-z1) / biglab 
+        zetabar = conjg(zeta)
+        zminzbar(20) = 1.d0
+        do n = 1,20
+            zminzbar(20-n) = zminzbar(21-n) * (zeta-zetabar)  ! Ordered from high power to low power
+        end do
+        gamnew = gam
+        do n = 0,20
+            gamnew(n,0:n) = gamnew(n,0:n) * zminzbar(20-n:20)
+            gam2(n,0:n) = conjg(gamnew(n,0:n))
+        end do
+        
+        alpha(0:40) = 0.d0
+        beta(0:40) = 0.d0
+        alpha2(0:40) = 0.d0
+        alpha(0) = anew(0)
+        beta(0) = bnew(0)
+        alpha2(0) = anew(0)
+        do n = 1,20
+            alpha(n:2*n) = alpha(n:2*n) + anew(n) * gamnew(n,0:n)
+            beta(n:2*n)  = beta(n:2*n)  + bnew(n) * gamnew(n,0:n)
+            alpha2(n:2*n) = alpha2(n:2*n) + anew(n) * gam2(n,0:n)
+        end do
+
+        d1minzeta = d1/biglab - zeta
+        d2minzeta = d2/biglab - zeta
+        !d1minzeta = -1.d0/biglab - zeta
+        !d2minzeta = 1.d0/biglab - zeta
+        if (abs(d1minzeta) < tol) d1minzeta = d1minzeta + cmplx(tol,0.d0,kind=8)
+        if (abs(d2minzeta) < tol) d2minzeta = d2minzeta + cmplx(tol,0.d0,kind=8)
+        log1 = log(d1minzeta)
+        log2 = log(d2minzeta)
+        
+        do p = 0,order+1
+        
+            alphanew(0:40+p) = 0.d0
+            betanew(0:40+p) = 0.d0
+            alphanew2(0:40+p) = 0.d0
+            do m = 0,p
+                cm = biglab**p * gam(p,m) * zeta**(p-m)
+                alphanew(m:40+m) = alphanew(m:40+m) + cm * alpha(0:40)
+                betanew(m:40+m)  = betanew(m:40+m) + cm * beta(0:40)
+                cm = biglab**p * gam(p,m) * zetabar**(p-m)
+                alphanew2(m:40+m) = alphanew2(m:40+m) + cm * alpha2(0:40)
+            end do
+            
+            omega(p) = 0.d0
+            term1 = 1.d0
+            term2 = 1.d0
+            do n = 0,40
+                term1 = term1 * d1minzeta
+                term2 = term2 * d2minzeta
+                omega(p) = omega(p) + ( alphanew(n) * log2 - alphanew(n) / (n+1) + betanew(n) ) * term2 / (n+1)
+                omega(p) = omega(p) - ( alphanew(n) * log1 - alphanew(n) / (n+1) + betanew(n) ) * term1 / (n+1)
+                omega(p) = omega(p) + ( alphanew2(n) * conjg(log2) - alphanew2(n) / (n+1) ) * conjg(term2) / (n+1)
+                omega(p) = omega(p) - ( alphanew2(n) * conjg(log1) - alphanew2(n) / (n+1) ) * conjg(term1) / (n+1)
+            end do
+                
+        end do
+        
+        omegalap = lapld_int_ho_d1d2(x,y,z1,z2,order,d1,d2) / dcmplx(0.d0,1.d0)
+        omegaom = besselldpart(x,y,z1,z2,lab,order,d1,d2)
+        wdis = lapld_int_ho_wdis_d1d2(x,y,z1,z2,order,d1,d2)
+        
+        rvz =    -biglab * bigy / (2.d0*pi*biglabcomplex**2) * (omega(1:order+1)/biglab - zetabar * omega(0:order)) + &
+                 biglab * omegaom / dcmplx(0.d0,2.d0)
+        rvzbar = -biglab * bigy / (2.d0*pi*biglabcomplex**2) * (omega(1:order+1)/biglab - zeta * omega(0:order)) - &
+                 biglab * omegaom / dcmplx(0.d0,2.d0)
+        !qxqy(0:order) = -2.0 / L * ( rvz + rvzbar ) / biglab  ! As we need to take derivative w.r.t. z not zeta
+        !qxqy(order+1:2*order+1) = -2.0 / L * dcmplx(0,1) * (rvz-rvzbar) / biglab
+        !
+        !qxqy(0:order) = qxqy(0:order) - 2.0 / L / biglabcomplex**2 * azero * ( omegalap + conjg(omegalap) )
+        !qxqy(order+1:2*order+1) = qxqy(order+1:2*order+1) -  &
+        !                          2.0 / L / biglabcomplex**2 * azero * dcmplx(0,1) * (omegalap - conjg(omegalap))
+        !                          
+        !qxqy(0:order) = qxqy(0:order) + real(wdis)
+        !qxqy(order+1:2*order+1) = qxqy(order+1:2*order+1) - aimag(wdis)
+        
+        qx = -2.0 / L * ( rvz + rvzbar ) / biglab  ! As we need to take derivative w.r.t. z not zeta
+        qy = -2.0 / L * dcmplx(0,1) * (rvz-rvzbar) / biglab
+
+        qx = qx - 2.0 / L / biglabcomplex**2 * azero * ( omegalap + conjg(omegalap) )
+        qy = qy - 2.0 / L / biglabcomplex**2 * azero * dcmplx(0,1) * (omegalap - conjg(omegalap))
+                                  
+        !qx = qx + real(wdis * (z2-z1) / L)
+        !qy = qy - aimag(wdis * (z2-z1) / L)
+        
+        print *,'angz ',angz
+        qxqy(0:order) = qx * cos(angz) - qy * sin(angz) + real(wdis)  ! wdis already includes the correct rotation
+        qxqy(order+1:2*order+1) = qx * sin(angz) + qy * cos(angz) - aimag(wdis)
+
+        return
+    end function besselld_int_ho_qxqy
+    
+    !function besselld_gauss_ho_qxqy(x,y,z1,z2,lab,order) result(qxqy)
+    !    implicit none
+    !    integer, intent(in) :: order
+    !    real(kind=8), intent(in) :: x,y
+    !    complex(kind=8), intent(in) :: z1,z2
+    !    complex(kind=8), intent(in) :: lab
+    !    complex(kind=8), dimension(0:2*order+1) :: qxqy
+    !    complex(kind=8), dimension(0:order) :: omega
+    !    integer :: n, p
+    !    real(kind=8) :: L, r, bigy, xmind
+    !    complex(kind=8) :: bigz, biglab
+    !    real(kind=8), dimension(8) :: r
+    !    complex(kind=8), dimension(8) :: k0,k1,qx,qy
+    !    
+    !    L = abs(z2-z1)
+    !    biglab = 2.d0 * lab / L
+    !    bigz = (2.d0 * cmplx(x,y,kind=8) - (z1+z2) ) / (z2-z1)
+    !    bigy = aimag(bigz)
+    !    do n = 1,8
+    !        xmind(n) = real(bigz) - xg(n)
+    !        r(n) = sqrt( xmind**2 + aimag(bigz)**2 )
+    !        k0(n) = besselk0( xmind, aimag(bigz), biglab )
+    !        k1(n) = besselk1( xmind, aimag(bigz), biglab )
+    !    end do
+    !    qx = dcmplx(0.d0,0.d0)
+    !    qy = dcmplx(0.d0,0.d0)
+    !    do p = 0,order
+    !        do n = 1,8
+    !            qx(p) = qx(p) + wg(n) * xg(n)**p * &
+    !                    (-biglab) * xmind(n) / r(n)**3 * ( r(n)*k0(n)/biglab + 2.d0*k1(n))
+    !            qy(p) = qy(p) + wg(n) * xg(n)**p * &
+    !                    ( k1(n)/r(n) - biglab**2 / r(n)**3 * ( r(n)*k0(n)/biglab + 2.d0*k1(n)) )
+    !        end do
+    !        qx(p) = qx(p) / (2*pi*biglab) * 2.d0/L
+    !        qy(p) = qy(p) / (2*pi*biglab) * 2.d0/L
+    !    end do
+    !    
+    !    angz = atan2(aimag(z2-z1),real(z2-z1))
+    !    qxqy(0:order) = qx * cos(angz) - qy * sin(angz) + real(wdis)  ! wdis already includes the correct rotation
+    !    qxqy(order+1:2*order+1) = qx * sin(angz) + qy * cos(angz) - aimag(wdis)
+    !    return
+    !end function besselld_gauss_ho_qxqy
     
     function bessells_circcheck(x,y,z1in,z2in,lab) result(omega)
         implicit none
@@ -1352,6 +1807,7 @@ contains
 
         return
     end function bessellsOK
+    
 
 
 end module bessel
@@ -1359,20 +1815,77 @@ end module bessel
 program besseltest
     use bessel
 
-    !real(kind=8) :: omega,omega1,omega2, z, lab
     real(kind=8), dimension(0:0) :: omega
-    complex(kind=8), dimension(0:2) :: omegac
-    complex(kind=8), dimension(0:2) :: om0, om1, om2, om3, om4, qxnum, qynum
-    complex(kind=8), dimension(0:5) :: qxqy
-    complex(kind=8) :: lab, z, om
-    real(kind=8) :: d, L
+    real(kind=8), dimension(0:0) :: omegac
+    complex(kind=8), dimension(0:0) :: om0, om1, om2, om3, om4, qxnum, qynum, wdis
+    complex(kind=8), dimension(0:1) :: qxqy
+    complex(kind=8) :: lab, z, om, z1, z2, z3
+    real(kind=8) :: d, L, x, y
+    integer :: order
     call initialize
-    omegac = lapls_int_ho(2.d0,1.d0,dcmplx(-1.d0,-1.d0),dcmplx(1.d0,0.d0),2)
-    print *,omegac
-    !lab = dcmplx(2.d0,1.d0)
-    !omegac = besselld_int_ho(8.d0,2.d0,dcmplx(-1.d0,1.d0),dcmplx(2.d0,0.d0),lab,0)
-    !print *,'int1   ',omegac
-    !omegac = besselld_int_ho(8.d0,2.d0,dcmplx(-1.d0,1.d0),dcmplx(2.d0,0.d0),lab,0)
+    !d = 1.d-3
+    !lab = dcmplx(0.5d0,0.5d0)
+    !z1 = dcmplx(-2.d0,-1.d0)
+    !z2 = dcmplx(2.d0,1.d0)
+    !z3 = dcmplx(0.d0,0.d0)
+    !order = 2
+    !om0 = lapld_int_ho_wdis_d1d2(1.d0,2.d0,z1,z2,order,-1.d0,1.d0)
+    !om1 = lapld_int_ho_wdis_d1d2(1.d0,2.d0,z1,z2,order,-1.d0,0.d0)
+    !om2 = lapld_int_ho_wdis_d1d2(1.d0,2.d0,z1,z2,order,0.d0,1.d0)
+    !print *,'om1       ',om1
+    !print *,'om2       ',om2
+    !print *,'om1+om2   ',om1+om2
+    !print *,'om0       ',om0
+    !
+    !om1 = besselld_int_ho(6.d0,2.d0,z1,z2,lab,order,-1.d0,1.d0)
+    !om2 = besselld_gauss_ho(6.d0,2.d0,z1,z2,lab,order)
+    !om3 = besselld(6.d0,2.d0,z1,z2,lab,order)
+    !print *,'om1       ',om1
+    !print *,'om2       ',om2
+    !print *,'om3       ',om3
+    !om0 = bessells_int(1.d0,2.d0,dcmplx(-1,0),dcmplx(1,0),lab)
+    !om1 = bessells_int(1.d0+d,2.d0,dcmplx(-1,0),dcmplx(0,0),lab)
+    !om2 = bessells_int(1.d0-d,2.d0,dcmplx(0,0),dcmplx(1,0),lab)
+    !print *,'om0       ',om0
+    !print *,'om1+om2   ',om1+om2
+
+    !omegac = lapls_int_ho(2.d0,1.d0,dcmplx(-1.d0,-1.d0),dcmplx(1.d0,0.d0),2)
+    !print *,omegac
+    !d = 1.d-3
+    !lab = dcmplx(1.d0,3.d0)
+    !z1 = dcmplx(-2.d0,-2.d0)
+    !z2 = dcmplx(2.d0,0.d0)
+    !order = 5
+    !om0 = lapld_int_ho(1.d0,2.d0,z1,z2,order)
+    !om1 = lapld_int_ho(1.d0+d,2.d0,z1,z2,order)
+    !om2 = lapld_int_ho(1.d0-d,2.d0,z1,z2,order)
+    !om3 = lapld_int_ho(1.d0,2.d0+d,z1,z2,order)
+    !om4 = lapld_int_ho(1.d0,2.d0-d,z1,z2,order)
+    !qxnum = (om2-om1)/(2.d0*d)
+    !qynum = (om4-om3)/(2.d0*d)
+    !wdis = lapld_int_ho_wdis(1.d0,2.d0,z1,z2,order)
+    !print *,'qx        ',real(wdis)
+    !print *,'numderx   ',real(qxnum)
+    !print *,'qy        ',-aimag(wdis)
+    !print *,'numdery   ',real(qynum)
+    d = 1.d-3
+    lab = dcmplx(1.d0,0.d0)
+    z1 = dcmplx(-2.d0,0.d0)
+    z2 = dcmplx(2.d0,0.d0)
+    x=2.d0
+    y = 2.d0
+    order = 0
+    om0 = besselld_int_ho(x,y,z1,z2,lab,order,-1.d0,1.d0)
+    om1 = besselld_int_ho(x+d,y,z1,z2,lab,order,-1.d0,1.d0)
+    om2 = besselld_int_ho(x-d,y,z1,z2,lab,order,-1.d0,1.d0)
+    om3 = besselld_int_ho(x,y+d,z1,z2,lab,order,-1.d0,1.d0)
+    om4 = besselld_int_ho(x,y-d,z1,z2,lab,order,-1.d0,1.d0)
+    qxqy = besselld_int_ho_qxqy(x,y,z1,z2,lab,order,-1.d0,1.d0)
+    print *,'qx        ',qxqy(0:order)
+    print *,'numderx   ',(om2-om1)/(2.d0*d)
+    print *,'qy        ',qxqy(order+1:2*order+1)
+    print *,'numdery   ',(om4-om3)/(2.d0*d)
+    !!omegac = besselld_int_ho(8.d0,2.d0,dcmplx(-1.d0,1.d0),dcmplx(2.d0,0.d0),lab,0)
     !print *,'int2   ',omegac
     !omegac = besselld_gauss_ho(8.d0,2.d0,dcmplx(-1.d0,1.d0),dcmplx(2.d0,0.d0),lab,0)
     !print *,'gauss1 ',omegac
