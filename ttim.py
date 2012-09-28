@@ -405,6 +405,7 @@ class AquiferData:
             self.coef[:,:,i] = np.linalg.solve( v, b ).T
         self.lab = 1.0 / np.sqrt(self.eigval)
         self.lab2 = self.lab.copy(); self.lab2.shape = (self.Naq,self.model.Nin,self.model.Npin)
+        self.lababs = np.abs(self.lab2[:,:,0]) # used to check distances
     def compute_lab_eigvec(self,p):
         sqrtpSc = np.sqrt( p * self.Sll * self.c )
         a, b = np.zeros_like(sqrtpSc), np.zeros_like(sqrtpSc)
@@ -669,6 +670,54 @@ class HeadEquation:
                 iself = self.model.vbcList.index(self)
                 for i in range(self.Nlayers):
                     rhs[istart+i,self.model.Ngbc+iself,:] = self.pc[istart+i] / self.model.p
+        return mat, rhs
+
+class HeadEquationNores:
+    def equation(self):
+        '''Mix-in class that returns matrix rows for head-specified conditions. (really written as constant potential element)
+        Returns matrix part Nunknowns,Neq,Np, complex
+        Returns rhs part Nunknowns,Nvbc,Np, complex
+        '''
+        mat = np.empty( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' )
+        rhs = np.zeros( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )  # Needs to be initialized to zero
+        for icp in range(self.Ncp):
+            istart = icp*self.Nlayers
+            ieq = 0  
+            for e in self.model.elementList:
+                if e.Nunknowns > 0:
+                    mat[istart:istart+self.Nlayers,ieq:ieq+e.Nunknowns,:] = e.potinflayers(self.xc[icp],self.yc[icp],self.pylayers)
+                    ieq += e.Nunknowns
+            for i in range(self.model.Ngbc):
+                rhs[istart:istart+self.Nlayers,i,:] -= self.model.gbcList[i].unitpotentiallayers(self.xc[icp],self.yc[icp],self.pylayers)  # Pretty cool that this works, really
+            if self.type == 'v':
+                iself = self.model.vbcList.index(self)
+                for i in range(self.Nlayers):
+                    rhs[istart+i,self.model.Ngbc+iself,:] = self.pc[istart+i] / self.model.p
+        return mat, rhs
+    
+class NoflowEquation:
+    def equation(self):
+        '''Mix-in class that returns matrix rows for no-flow condition
+        Returns matrix part Nunknowns,Neq,Np, complex
+        Returns rhs part Nunknowns,Nvbc,Np, complex
+        '''
+        mat = np.empty( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' )
+        rhs = np.zeros( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )  # Needs to be initialized to zero
+        for icp in range(self.Ncp):
+            istart = icp*self.Nlayers
+            ieq = 0  
+            for e in self.model.elementList:
+                if e.Nunknowns > 0:
+                    qx,qy = e.disinflayers(self.xc[icp],self.yc[icp],self.pylayers)
+                    mat[istart:istart+self.Nlayers,ieq:ieq+e.Nunknowns,:] = qx * self.cosout + qy * self.sinout
+                    ieq += e.Nunknowns
+            for i in range(self.model.Ngbc):
+                qx,qy = self.model.gbcList[i].unitdischargelayers(self.xc[icp],self.yc[icp],self.pylayers)
+                rhs[istart:istart+self.Nlayers,i,:] -=  qx * self.cosout + qy * self.sinout
+            #if self.type == 'v':
+            #    iself = self.model.vbcList.index(self)
+            #    for i in range(self.Nlayers):
+            #        rhs[istart+i,self.model.Ngbc+iself,:] = self.pc[istart+i] / self.model.p
         return mat, rhs
     
 class HeadEquationNew:
@@ -1105,12 +1154,164 @@ class LineSinkBase(Element):
                     bessel.circle_line_intersection(self.z1,self.z2,x+y*1j,self.Rzero*abs(self.model.aq.lab2[i,j,0]),self.xa,self.ya,self.xb,self.yb,self.np)
                     if self.np > 0:
                         za = complex(self.xa,self.ya); zb = complex(self.xb,self.yb) # f2py has problem returning complex arrays -> fixed in new numpy
-                        bessel.bessellsv(x,y,za,zb,self.aq.lab2[i,j,:],pot)
+                        bessel.bessellsuniv(x,y,za,zb,self.aq.lab2[i,j,:],pot)
                         rv[:,i,j,:] = self.term2[:,i,j,:] * pot / self.L  # Divide by L as the parameter is now total discharge
         rv.shape = (self.Nparam,aq.Naq,self.model.Np)
         return rv
     def headinside(self,t):
         return self.model.head(self.xc,self.yc,t)[self.pylayers] - self.resfach[:,np.newaxis] * self.strength(t)
+    def layout(self):
+        return 'line', [self.x1,self.x2], [self.y1,self.y2]
+        
+class LineSinkHoBase(Element):
+    '''Higher Order LineSink Base Class. All Higher Order Line Sink elements are derived from this class'''
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandbc=[(0.0,1.0)],res=0.0,wh='H',order=0,layers=1,type='',name='LineSinkBase',label=None,addtomodel=True):
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layers=layers, tsandbc=tsandbc, type=type, name=name, label=label)
+        self.order = order
+        self.Nparam = (self.order+1) * len(self.pylayers)
+        self.x1 = float(x1); self.y1 = float(y1); self.x2 = float(x2); self.y2 = float(y2); self.res = res; self.wh = wh
+        if addtomodel: self.model.addElement(self)
+        #self.xa,self.ya,self.xb,self.yb,self.np = np.zeros(1),np.zeros(1),np.zeros(1),np.zeros(1),np.zeros(1,'i')  # needed to call bessel.circle_line_intersection
+    def __repr__(self):
+        return self.name + ' from ' + str((self.x1,self.y1)) +' to '+str((self.x2,self.y2))
+    def initialize(self):
+        self.Ncp = self.order + 1
+        self.z1 = self.x1 + 1j*self.y1; self.z2 = self.x2 + 1j*self.y2
+        self.L = np.abs(self.z1-self.z2)
+        #
+        thetacp = np.arange(np.pi,0,-np.pi/self.Ncp) - 0.5 * np.pi/self.Ncp
+        Zcp = np.zeros( self.Ncp, 'D' )
+        Zcp.real = np.cos(thetacp)
+        Zcp.imag = 1e-6  # control point just on positive site (this is handy later on)
+        zcp = Zcp * (self.z2 - self.z1) / 2.0 + 0.5 * (self.z1 + self.z2)
+        self.xc = zcp.real; self.yc = zcp.imag
+        #
+        self.aq = self.model.aq.findAquiferData(self.xc[0],self.yc[0])
+        self.setbc()
+        coef = self.aq.coef[self.pylayers,:]
+        self.setflowcoef()
+        self.term = self.flowcoef * coef  # shape (self.Nlayers,self.aq.Naq,self.model.Np)
+        self.term2 = self.term.reshape(self.Nlayers,self.aq.Naq,self.model.Nin,self.model.Npin)
+        #self.term2 = np.empty((self.Nparam,self.aq.Naq,self.model.Nin,self.model.Npin),'D')
+        #for i in range(self.Nlayers):
+        #    self.term2[i*(self.order+1):(i+1)*(self.order+1),:,:,:] = self.term[i,:,:].reshape((1,self.aq.Naq,self.model.Nin,self.model.Npin))
+        self.strengthinf = self.flowcoef * coef
+        self.strengthinflayers = np.sum(self.strengthinf * self.aq.eigvec[self.pylayers,:,:], 1)
+        if self.wh == 'H':
+            self.wh = self.aq.Haq[self.pylayers]
+        elif self.wh == '2H':
+            self.wh = 2.0 * self.aq.Haq[self.pylayers]
+        else:
+            self.wh = np.atleast_1d(self.wh) * np.ones(self.Nlayers)
+        self.resfach = self.res / (self.wh * self.L)  # Q = (h - hls) / resfach
+        self.resfacp = self.resfach * self.aq.T[self.pylayers]  # Q = (Phi - Phils) / resfacp
+    def setflowcoef(self):
+        '''Separate function so that this can be overloaded for other types'''
+        self.flowcoef = 1.0 / self.model.p  # Step function
+    def potinf(self,x,y,aq=None):
+        '''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rv = np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D')
+        if aq == self.aq:
+            pot = np.zeros((self.order+1,self.model.Npin),'D')
+            for i in range(self.aq.Naq):
+                for j in range(self.model.Nin):
+                    if bessel.isinside(self.z1,self.z2,x+y*1j,self.Rzero*self.aq.lababs[i,j]):
+                        pot[:,:] = bessel.bessellsv2(x,y,self.z1,self.z2,self.aq.lab2[i,j,:],self.order,self.Rzero*self.aq.lababs[i,j]) / self.L  # Divide by L as the parameter is now total discharge
+                        for k in range(self.Nlayers):
+                            rv[k::self.Nlayers,i,j,:] = self.term2[k,i,j,:] * pot
+        rv.shape = (self.Nparam,aq.Naq,self.model.Np)
+        return rv
+    def disinf(self,x,y,aq=None):
+        '''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rvx,rvy = np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D'), np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D')
+        if aq == self.aq:
+            qxqy = np.zeros((2*(self.order+1),self.model.Npin),'D')
+            for i in range(self.aq.Naq):
+                for j in range(self.model.Nin):
+                    if bessel.isinside(self.z1,self.z2,x+y*1j,self.Rzero*self.aq.lababs[i,j]):
+                        qxqy[:,:] = bessel.bessellsqxqyv2(x,y,self.z1,self.z2,self.aq.lab2[i,j,:],self.order,self.Rzero*self.aq.lababs[i,j]) / self.L  # Divide by L as the parameter is now total discharge
+                        for k in range(self.Nlayers):
+                            rvx[k::self.Nlayers,i,j,:] = self.term2[k,i,j,:] * qxqy[:self.order+1,:]
+                            rvy[k::self.Nlayers,i,j,:] = self.term2[k,i,j,:] * qxqy[self.order+1:,:]
+        rvx.shape = (self.Nparam,aq.Naq,self.model.Np)
+        rvy.shape = (self.Nparam,aq.Naq,self.model.Np)
+        return rvx,rvy
+    def headinside(self,t):
+        return self.model.head(self.xc,self.yc,t)[self.pylayers] - self.resfach[:,np.newaxis] * self.strength(t)
+    def layout(self):
+        return 'line', [self.x1,self.x2], [self.y1,self.y2]
+        
+class LineDoubletHoBase(Element):
+    '''Higher Order LineDoublet Base Class. All Higher Order Line Doublet elements are derived from this class'''
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,order=0,layers=1,type='',name='LineDoubletHoBase',label=None,addtomodel=True):
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layers=layers, tsandbc=[(0.0,0.0)], type=type, name=name, label=label)
+        self.order = order
+        self.Nparam = (self.order+1) * len(self.pylayers)
+        self.x1 = float(x1); self.y1 = float(y1); self.x2 = float(x2); self.y2 = float(y2)
+        if addtomodel: self.model.addElement(self)
+        #self.xa,self.ya,self.xb,self.yb,self.np = np.zeros(1),np.zeros(1),np.zeros(1),np.zeros(1),np.zeros(1,'i')  # needed to call bessel.circle_line_intersection
+    def __repr__(self):
+        return self.name + ' from ' + str((self.x1,self.y1)) +' to '+str((self.x2,self.y2))
+    def initialize(self):
+        self.Ncp = self.order + 1
+        self.z1 = self.x1 + 1j*self.y1; self.z2 = self.x2 + 1j*self.y2
+        self.L = np.abs(self.z1-self.z2)
+        self.thetaNormOut = np.arctan2(self.y2-self.y1,self.x2-self.x1) - np.pi/2.0
+        self.cosout = np.cos( self.thetaNormOut ); self.sinout = np.sin( self.thetaNormOut )
+        #
+        thetacp = np.arange(np.pi,0,-np.pi/self.Ncp) - 0.5 * np.pi/self.Ncp
+        Zcp = np.zeros( self.Ncp, 'D' )
+        Zcp.real = np.cos(thetacp)
+        Zcp.imag = 1e-6  # control point just on positive site (this is handy later on)
+        zcp = Zcp * (self.z2 - self.z1) / 2.0 + 0.5 * (self.z1 + self.z2)
+        self.xc = zcp.real; self.yc = zcp.imag
+        #
+        self.aq = self.model.aq.findAquiferData(self.xc[0],self.yc[0])
+        self.setbc()
+        coef = self.aq.coef[self.pylayers,:]
+        self.setflowcoef()
+        self.term = self.flowcoef * coef  # shape (self.Nlayers,self.aq.Naq,self.model.Np)
+        self.term2 = self.term.reshape(self.Nlayers,self.aq.Naq,self.model.Nin,self.model.Npin)
+        #self.term2 = np.empty((self.Nparam,self.aq.Naq,self.model.Nin,self.model.Npin),'D')
+        #for i in range(self.Nlayers):
+        #    self.term2[i*(self.order+1):(i+1)*(self.order+1),:,:,:] = self.term[i,:,:].reshape((1,self.aq.Naq,self.model.Nin,self.model.Npin))
+        self.strengthinf = self.flowcoef * coef
+        self.strengthinflayers = np.sum(self.strengthinf * self.aq.eigvec[self.pylayers,:,:], 1)
+    def setflowcoef(self):
+        '''Separate function so that this can be overloaded for other types'''
+        self.flowcoef = 1.0 / self.model.p  # Step function
+    def potinf(self,x,y,aq=None):
+        '''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rv = np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D')
+        if aq == self.aq:
+            pot = np.zeros((self.order+1,self.model.Npin),'D')
+            for i in range(self.aq.Naq):
+                for j in range(self.model.Nin):
+                    if bessel.isinside(self.z1,self.z2,x+y*1j,self.Rzero*self.aq.lababs[i,j]):
+                        pot[:,:] = bessel.besselldv2(x,y,self.z1,self.z2,self.aq.lab2[i,j,:],self.order,self.Rzero*self.aq.lababs[i,j]) / self.L  # Divide by L as the parameter is now total discharge
+                        for k in range(self.Nlayers):
+                            rv[k::self.Nlayers,i,j,:] = self.term2[k,i,j,:] * pot
+        rv.shape = (self.Nparam,aq.Naq,self.model.Np)
+        return rv
+    def disinf(self,x,y,aq=None):
+        '''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rvx,rvy = np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D'), np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D')
+        if aq == self.aq:
+            qxqy = np.zeros((2*(self.order+1),self.model.Npin),'D')
+            for i in range(self.aq.Naq):
+                for j in range(self.model.Nin):
+                    if bessel.isinside(self.z1,self.z2,x+y*1j,self.Rzero*self.aq.lababs[i,j]):
+                        qxqy[:,:] = bessel.besselldqxqyv2(x,y,self.z1,self.z2,self.aq.lab2[i,j,:],self.order,self.Rzero*self.aq.lababs[i,j]) / self.L  # Divide by L as the parameter is now total discharge
+                        for k in range(self.Nlayers):
+                            rvx[k::self.Nlayers,i,j,:] = self.term2[k,i,j,:] * qxqy[:self.order+1,:]
+                            rvy[k::self.Nlayers,i,j,:] = self.term2[k,i,j,:] * qxqy[self.order+1:,:]
+        rvx.shape = (self.Nparam,aq.Naq,self.model.Np)
+        rvy.shape = (self.Nparam,aq.Naq,self.model.Np)
+        return rvx,rvy
     def layout(self):
         return 'line', [self.x1,self.x2], [self.y1,self.y2]
     
@@ -1257,6 +1458,29 @@ class HeadLineSink(LineSinkBase,HeadEquation):
         LineSinkBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
         self.pc = self.aq.T[self.pylayers] # Needed in solving; We solve for a unit head
+        
+class HeadLineSinkHo(LineSinkHoBase,HeadEquationNores):
+    '''HeadLineSink of which the head varies through time. May be screened in multiple layers but all with the same head'''
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandh=[(0.0,1.0)],order=0,layers=1,label=None,addtomodel=True):
+        self.storeinput(inspect.currentframe())
+        LineSinkHoBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandh,res=0.0,wh='H',order=order,layers=layers,type='v',name='HeadLineSinkHo',label=label,addtomodel=addtomodel)
+        self.Nunknowns = self.Nparam
+    def initialize(self):
+        LineSinkHoBase.initialize(self)
+        self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
+        self.pc = np.empty(self.Nparam)
+        for i,T in enumerate(self.aq.T[self.pylayers]):
+            self.pc[i::self.Nlayers] =  T # Needed in solving; we solve for a unit head
+            
+class ImpermeableLineDoublet(LineDoubletHoBase,NoflowEquation):
+    '''Impermeable LineDoublet'''
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandh=[(0.0,1.0)],order=0,layers=1,label=None,addtomodel=True):
+        self.storeinput(inspect.currentframe())
+        LineSinkHoBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=[(0.0,0.0)],order=order,layers=layers,type='z',name='ImpermeableLineDoublet',label=label,addtomodel=addtomodel)
+        self.Nunknowns = self.Nparam
+    def initialize(self):
+        LineSinkHoBase.initialize(self)
+        self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
 
 class LineSinkStringBase(Element):
     def __init__(self,model,xy=[(-1,0),(1,0)],tsandbc=[(0.0,1.0)],layers=1,type='',name='LineSinkStringBase',label=None):
@@ -1475,16 +1699,40 @@ def timlayout( ml, ax, color = 'k', lw = 0.5, style = '-' ):
 
 ##########################################
 
-#ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.01,tmax=10,M=20)
-ml = Model3D(kaq=[4,5],z=[2,1,0],Saq=1e-3,kzoverkh=0.1,phreatictop=False,tmin=0.01,tmax=10,M=20)
-w = DischargeWell(ml,xw=0,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
-#c1a = CircInhomDataMaq(ml,0,0,10,[10,2],[4,2,1,0],[200],[2e-3,2e-4],[1e-5])
-c1a = CircInhomData3D(ml,0,0,10,kaq=[10,2],z=[2,1,0],Saq=1e-3,kzoverkh=0.1,phreatictop=False)
-c1 = CircInhomRadial(ml,0,0,10)
-#c2a = CircInhomDataMaq(ml,0,0,20,[.01,.02],[4,2,1,0],[300],[0.5e-3,2e-4],[1e-5])
-c2a = CircInhomData3D(ml,0,0,20,kaq=[0.01,0.02],z=[2,1,0],Saq=1e-3,kzoverkh=0.1,phreatictop=False)
-c2 = CircInhomRadial(ml,0,0,20)
-#ml.solve()
+#ml1 = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
+#ml1 = ModelMaq(kaq=[4],z=[1,0],Saq=[1e-3],tmin=1,tmax=10,M=20)
+#ls1 = LineSinkBase(ml1,type='g')
+#ml1.solve()
+#ml2 = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-1,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
+##ml2 = ModelMaq(kaq=[4],z=[1,0],Saq=[1e-3],tmin=1,tmax=10,M=20)
+#ld1 = LineDoubletHoBase(ml2,order=2,type='g')
+##ls2 = HeadLineSinkHo(ml2,order=5,layers=[1,2])
+#ml2.solve()
+
+ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-1,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
+ld1 = ImpermeableLineDoublet(ml,x1=-1,y1=0,x2=1,y2=0,order=0)
+ml.solve()
+d = 1e-3
+x = 2.0
+y = 3.0
+p1 = ld1.potinf(x-d,y)
+p2 = ld1.potinf(x+d,y)
+qxnum = (p1-p2)/(2.0*d)
+p3 = ld1.potinf(x,y-d)
+p4 = ld1.potinf(x,y+d)
+qynum = (p3-p4)/(2.0*d)
+qx,qy = ld1.disinf(x,y)
+
+##ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.01,tmax=10,M=20)
+#ml = Model3D(kaq=[4,5],z=[2,1,0],Saq=1e-3,kzoverkh=0.1,phreatictop=False,tmin=0.01,tmax=10,M=20)
+#w = DischargeWell(ml,xw=0,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
+##c1a = CircInhomDataMaq(ml,0,0,10,[10,2],[4,2,1,0],[200],[2e-3,2e-4],[1e-5])
+#c1a = CircInhomData3D(ml,0,0,10,kaq=[10,2],z=[2,1,0],Saq=1e-3,kzoverkh=0.1,phreatictop=False)
+#c1 = CircInhomRadial(ml,0,0,10)
+##c2a = CircInhomDataMaq(ml,0,0,20,[.01,.02],[4,2,1,0],[300],[0.5e-3,2e-4],[1e-5])
+#c2a = CircInhomData3D(ml,0,0,20,kaq=[0.01,0.02],z=[2,1,0],Saq=1e-3,kzoverkh=0.1,phreatictop=False)
+#c2 = CircInhomRadial(ml,0,0,20)
+##ml.solve()
 #
 #h1 = (c1.potentiallayers(c1.xc,c1.yc,c1.pylayers,c1.aqin) + w.unitpotentiallayers(c1.xc,c1.yc,c1.pylayers,c1.aqin)) / c1.aqin.T[:,np.newaxis]
 #h2 = (c1.potentiallayers(c1.xc,c1.yc,c1.pylayers,c1.aqout) + c2.potentiallayers(c1.xc,c1.yc,c1.pylayers,c1.aqout) + w.unitpotentiallayers(c1.xc,c1.yc,c1.pylayers,c1.aqout)) / c1.aqout.T[:,np.newaxis]
