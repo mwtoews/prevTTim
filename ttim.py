@@ -1245,8 +1245,8 @@ class LineSinkHoBase(Element):
         
 class LineDoubletHoBase(Element):
     '''Higher Order LineDoublet Base Class. All Higher Order Line Doublet elements are derived from this class'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,order=0,layers=1,type='',name='LineDoubletHoBase',label=None,addtomodel=True):
-        Element.__init__(self, model, Nparam=1, Nunknowns=0, layers=layers, tsandbc=[(0.0,0.0)], type=type, name=name, label=label)
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandbc=[(0.0,0.0)],order=0,layers=1,type='',name='LineDoubletHoBase',label=None,addtomodel=True):
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layers=layers,tsandbc=tsandbc, type=type, name=name, label=label)
         self.order = order
         self.Nparam = (self.order+1) * len(self.pylayers)
         self.x1 = float(x1); self.y1 = float(y1); self.x2 = float(x2); self.y2 = float(y2)
@@ -1274,9 +1274,7 @@ class LineDoubletHoBase(Element):
         self.setflowcoef()
         self.term = self.flowcoef * coef  # shape (self.Nlayers,self.aq.Naq,self.model.Np)
         self.term2 = self.term.reshape(self.Nlayers,self.aq.Naq,self.model.Nin,self.model.Npin)
-        #self.term2 = np.empty((self.Nparam,self.aq.Naq,self.model.Nin,self.model.Npin),'D')
-        #for i in range(self.Nlayers):
-        #    self.term2[i*(self.order+1):(i+1)*(self.order+1),:,:,:] = self.term[i,:,:].reshape((1,self.aq.Naq,self.model.Nin,self.model.Npin))
+        # Still gotta change strengthinf
         self.strengthinf = self.flowcoef * coef
         self.strengthinflayers = np.sum(self.strengthinf * self.aq.eigvec[self.pylayers,:,:], 1)
     def setflowcoef(self):
@@ -1474,12 +1472,12 @@ class HeadLineSinkHo(LineSinkHoBase,HeadEquationNores):
             
 class ImpermeableLineDoublet(LineDoubletHoBase,NoflowEquation):
     '''Impermeable LineDoublet'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandh=[(0.0,1.0)],order=0,layers=1,label=None,addtomodel=True):
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,order=0,layers=1,label=None,addtomodel=True):
         self.storeinput(inspect.currentframe())
-        LineSinkHoBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=[(0.0,0.0)],order=order,layers=layers,type='z',name='ImpermeableLineDoublet',label=label,addtomodel=addtomodel)
+        LineDoubletHoBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=[(0.0,0.0)],order=order,layers=layers,type='z',name='ImpermeableLineDoublet',label=label,addtomodel=addtomodel)
         self.Nunknowns = self.Nparam
     def initialize(self):
-        LineSinkHoBase.initialize(self)
+        LineDoubletHoBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
 
 class LineSinkStringBase(Element):
@@ -1709,19 +1707,12 @@ def timlayout( ml, ax, color = 'k', lw = 0.5, style = '-' ):
 ##ls2 = HeadLineSinkHo(ml2,order=5,layers=[1,2])
 #ml2.solve()
 
-ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-1,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
-ld1 = ImpermeableLineDoublet(ml,x1=-1,y1=0,x2=1,y2=0,order=0)
+ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-1,1e-4],Sll=[1e-6],tmin=0.1,tmax=10,M=20)
+w = DischargeWell(ml,0,20,.1)
+ld1 = ImpermeableLineDoublet(ml,x1=-20,y1=0,x2=20,y2=0,order=2,layers=[1,2])
+ld2 = ImpermeableLineDoublet(ml,x1=20,y1=0,x2=40,y2=20,order=2,layers=[1,2])
 ml.solve()
-d = 1e-3
-x = 2.0
-y = 3.0
-p1 = ld1.potinf(x-d,y)
-p2 = ld1.potinf(x+d,y)
-qxnum = (p1-p2)/(2.0*d)
-p3 = ld1.potinf(x,y-d)
-p4 = ld1.potinf(x,y+d)
-qynum = (p3-p4)/(2.0*d)
-qx,qy = ld1.disinf(x,y)
+
 
 ##ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.01,tmax=10,M=20)
 #ml = Model3D(kaq=[4,5],z=[2,1,0],Saq=1e-3,kzoverkh=0.1,phreatictop=False,tmin=0.01,tmax=10,M=20)
