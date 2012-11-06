@@ -12,7 +12,7 @@ from cmath import tanh as cmath_tanh
 import inspect # Used for storing the input
 import os
 
-__version__ = 0.2
+__version__ = 0.21
 
 class TimModel:
     def __init__(self,kaq=[1,1],Haq=[1,1],c=[np.nan,100],Saq=[0.3,0.003],Sll=[0],topboundary='imp',tmin=1,tmax=10,M=20):
@@ -714,7 +714,7 @@ class LeakyWallEquation:
             for e in self.model.elementList:
                 if e.Nunknowns > 0:
                     qx,qy = e.disinflayers(self.xc[icp],self.yc[icp],self.pylayers)
-                    mat[istart:istart+self.Nlayers,ieq:ieq+e.Nunknowns,:] = qx * self.cosout + qy * self.sinout
+                    mat[istart:istart+self.Nlayers,ieq:ieq+e.Nunknowns,:] = qx * self.cosout[icp] + qy * self.sinout[icp]
                     if e == self:
                         hmin = e.potinflayers(self.xcneg[icp],self.ycneg[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis,np.newaxis]
                         hplus = e.potinflayers(self.xc[icp],self.yc[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis,np.newaxis]
@@ -722,7 +722,7 @@ class LeakyWallEquation:
                     ieq += e.Nunknowns
             for i in range(self.model.Ngbc):
                 qx,qy = self.model.gbcList[i].unitdischargelayers(self.xc[icp],self.yc[icp],self.pylayers)
-                rhs[istart:istart+self.Nlayers,i,:] -=  qx * self.cosout + qy * self.sinout
+                rhs[istart:istart+self.Nlayers,i,:] -=  qx * self.cosout[icp] + qy * self.sinout[icp]
             #if self.type == 'v':
             #    iself = self.model.vbcList.index(self)
             #    for i in range(self.Nlayers):
@@ -1313,7 +1313,7 @@ class LineDoubletHoBase(Element):
         self.z1 = self.x1 + 1j*self.y1; self.z2 = self.x2 + 1j*self.y2
         self.L = np.abs(self.z1-self.z2)
         self.thetaNormOut = np.arctan2(self.y2-self.y1,self.x2-self.x1) - np.pi/2.0
-        self.cosout = np.cos( self.thetaNormOut ); self.sinout = np.sin( self.thetaNormOut )
+        self.cosout = np.cos( self.thetaNormOut ) * np.ones(self.Ncp); self.sinout = np.sin( self.thetaNormOut ) * np.ones(self.Ncp)
         #
         thetacp = np.arange(np.pi,0,-np.pi/self.Ncp) - 0.5 * np.pi/self.Ncp
         Zcp = np.zeros( self.Ncp, 'D' )
@@ -1321,7 +1321,7 @@ class LineDoubletHoBase(Element):
         Zcp.imag = 1e-6  # control point just on positive site (this is handy later on)
         zcp = Zcp * (self.z2 - self.z1) / 2.0 + 0.5 * (self.z1 + self.z2)
         self.xc = zcp.real; self.yc = zcp.imag
-        Zcp.imag = -1e-6  # control point just on positive side (this is handy later on)
+        Zcp.imag = -1e-6  # control point just on negative side (this is needed for building the system of equations)
         zcp = Zcp * (self.z2 - self.z1) / 2.0 + 0.5 * (self.z1 + self.z2)
         self.xcneg = zcp.real; self.ycneg = zcp.imag  # control points just on negative side     
         #
@@ -1529,10 +1529,10 @@ class HeadLineSinkHo(LineSinkHoBase,HeadEquationNores):
             self.pc[i::self.Nlayers] =  T # Needed in solving; we solve for a unit head
             
 class LeakyLineDoublet(LineDoubletHoBase,LeakyWallEquation):
-    '''Impermeable LineDoublet'''
+    '''Leaky LineDoublet'''
     def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,res='imp',order=0,layers=1,label=None,addtomodel=True):
         self.storeinput(inspect.currentframe())
-        LineDoubletHoBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=[(0.0,0.0)],res=res,order=order,layers=layers,type='z',name='ImpermeableLineDoublet',label=label,addtomodel=addtomodel)
+        LineDoubletHoBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=[(0.0,0.0)],res=res,order=order,layers=layers,type='z',name='LeakyLineDoublet',label=label,addtomodel=addtomodel)
         self.Nunknowns = self.Nparam
     def initialize(self):
         LineDoubletHoBase.initialize(self)
@@ -1675,6 +1675,64 @@ class HeadLineSinkString(LineSinkStringBase,HeadEquation):
         LineSinkStringBase.initialize(self)
         self.pc = np.zeros(self.Nls*self.Nlayers)
         for i in range(self.Nls): self.pc[i*self.Nlayers:(i+1)*self.Nlayers] = self.lsList[i].pc
+        
+class LeakyLineDoubletString(Element,LeakyWallEquation):
+    def __init__(self,model,xy=[(-1,0),(1,0)],res='imp',order=0,layers=1,label=None):
+        self.storeinput(inspect.currentframe())
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layers=layers, tsandbc=[(0.0,0.0)], type='z', name='LeakyLineDoubletString', label=label)
+        self.res = res
+        self.order = order
+        self.ldList = []
+        xy = np.atleast_2d(xy).astype('d')
+        self.x,self.y = xy[:,0], xy[:,1]
+        self.Nld = len(self.x) - 1
+        for i in range(self.Nld):
+            self.ldList.append( LeakyLineDoublet(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],res=self.res,order=self.order,layers=layers,label=label,addtomodel=False))
+        self.model.addElement(self)
+    def __repr__(self):
+        return self.name + ' with nodes ' + str(zip(self.x,self.y))
+    def initialize(self):
+        for ld in self.ldList:
+            ld.initialize()
+        self.Ncp = self.Nld * self.ldList[0].Ncp  # Same order for all elements in string
+        self.Nparam = self.Nld * self.ldList[0].Nparam
+        self.Nunknowns = self.Nparam
+        self.xld,self.yld = np.empty((self.Nld,2)), np.empty((self.Nld,2))
+        for i,ld in enumerate(self.ldList):
+            self.xld[i,:] = [ld.x1,ld.x2]
+            self.yld[i,:] = [ld.y1,ld.y2]
+        self.xldlayout = np.hstack((self.xld[:,0],self.xld[-1,1])) # Only used for layout when it is a continuous string
+        self.yldlayout = np.hstack((self.yld[:,0],self.yld[-1,1]))
+        self.aq = self.model.aq.findAquiferData(self.ldList[0].xc,self.ldList[0].yc)
+        self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
+        self.setbc()
+        # As parameters are only stored for the element not the list, we need to combine the following
+        self.resfac = self.ldList[0].resfac  # same for all elements in the list
+        self.xc, self.yc = np.zeros(self.Ncp), np.zeros(self.Ncp)
+        self.xcneg, self.ycneg = np.zeros(self.Ncp), np.zeros(self.Ncp)
+        self.cosout, self.sinout = np.zeros(self.Ncp), np.zeros(self.Ncp)
+        for i,ld in enumerate(self.ldList):
+            self.xc[i*ld.Ncp:(i+1)*ld.Ncp], self.yc[i*ld.Ncp:(i+1)*ld.Ncp] = ld.xc, ld.yc
+            self.xcneg[i*ld.Ncp:(i+1)*ld.Ncp], self.ycneg[i*ld.Ncp:(i+1)*ld.Ncp] = ld.xcneg, ld.ycneg
+            self.cosout[i*ld.Ncp:(i+1)*ld.Ncp], self.sinout[i*ld.Ncp:(i+1)*ld.Ncp] = ld.cosout, ld.sinout
+    def potinf(self,x,y,aq=None):
+        '''Returns array (Nunknowns,Nperiods)'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rv = np.zeros((self.Nparam,aq.Naq,self.model.Np),'D')
+        for i,ld in enumerate(self.ldList):
+            rv[i*ld.Nparam:(i+1)*ld.Nparam,:] = ld.potinf(x,y,aq)
+        return rv
+    def disinf(self,x,y,aq=None):
+        '''Returns array (Nunknowns,Nperiods)'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rvx,rvy = np.zeros((self.Nparam,aq.Naq,self.model.Np),'D'),np.zeros((self.Nparam,aq.Naq,self.model.Np),'D')
+        for i,ld in enumerate(self.ldList):
+            qx,qy = ld.disinf(x,y,aq)
+            rvx[i*ld.Nparam:(i+1)*ld.Nparam,:] = qx
+            rvy[i*ld.Nparam:(i+1)*ld.Nparam,:] = qy
+        return rvx,rvy
+    def layout(self):
+        return 'line', self.xldlayout, self.yldlayout
     
 def xsection(ml,x1=0,x2=1,y1=0,y2=0,N=100,t=1,layers=1,color=None,lw=1,newfig=True):
     if newfig: plt.figure()
@@ -1821,25 +1879,16 @@ def timlayout( ml, ax = None, color = 'k', lw = 0.5, style = '-' ):
 ##ls2 = HeadLineSinkHo(ml2,order=5,layers=[1,2])
 #ml2.solve()
 
-ml = ModelMaq(kaq=[3,4,5],z=[10,6,4,2,1,0],c=[200,100],Saq=[1e-1,1e-3,1e-4],Sll=[1e-5,1e-6],tmin=0.1,tmax=10,M=20)
-w = DischargeWell(ml,0,20,.1,layers=[1])
-ld1 = LeakyLineDoublet(ml,x1=-20,y1=0,x2=20,y2=0,res=4,order=2,layers=[1,2])  # Along x-axis
-ld2 = LeakyLineDoublet(ml,x1=20,y1=0,x2=40,y2=20,res=4,order=2,layers=[2,3])  # 45 degree angle
-ml.solve()
-t = [3]
-qx1,qy1 = ml.discharge(ld1.xc[0],ld1.yc[0],t,ld1.layers)
-hmin1 = ml.head(ld1.xcneg[0],ld1.ycneg[0],t,ld1.layers)
-hplus1 = ml.head(ld1.xc[0],ld1.yc[0],t,ld1.layers)
-qy1num = ml.aq.Haq[ld1.pylayers][:,np.newaxis] * (hmin1-hplus1) / ld1.res
-print 'qy1 ',qy1
-print 'qy1num ',qy1num
-qx2,qy2 = ml.discharge(ld2.xc[1],ld2.yc[1],t,ld2.layers)
-qnorm = -qx2 * np.cos(np.pi/4) + qy2 * np.sin(np.pi/4)
-hmin2 = ml.head(ld2.xcneg[1],ld2.ycneg[1],t,ld2.layers)
-hplus2 = ml.head(ld2.xc[1],ld2.yc[1],t,ld2.layers)
-qnum = ml.aq.Haq[ld2.pylayers][:,np.newaxis] * (hmin2-hplus2) / ld2.res
-print 'qnorm ',qnorm
-print 'qnum ',qnum
+#ml1 = ModelMaq(kaq=[3,4,5],z=[10,6,4,2,1,0],c=[200,100],Saq=[1e-1,1e-3,1e-4],Sll=[1e-5,1e-6],tmin=0.1,tmax=10,M=20)
+#w = DischargeWell(ml1,0,20,.1,layers=[1])
+#ld1 = LeakyLineDoublet(ml1,x1=-20,y1=0,x2=20,y2=0,res=4,order=2,layers=[1,2])  # Along x-axis
+#ld2 = LeakyLineDoublet(ml1,x1=20,y1=0,x2=40,y2=20,res=4,order=2,layers=[1,2])  # 45 degree angle
+#ml1.solve()
+#
+#ml2 = ModelMaq(kaq=[3,4,5],z=[10,6,4,2,1,0],c=[200,100],Saq=[1e-1,1e-3,1e-4],Sll=[1e-5,1e-6],tmin=0.1,tmax=10,M=20)
+#w = DischargeWell(ml2,0,20,.1,layers=[1])
+#lds = LeakyLineDoubletString(ml2,xy=[(-20,0),(20,0),(40,20)],res=4,order=2,layers=[1,2])
+#ml2.solve()
 
 
 ##ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=.01,tmax=10,M=20)
