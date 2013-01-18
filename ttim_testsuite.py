@@ -134,6 +134,60 @@ class TTimTest(unittest.TestCase):
         print 'qnum ',qnum
         np.testing.assert_almost_equal(qy1,qy1num,decimal=3)
         np.testing.assert_almost_equal(qnorm,qnum,decimal=3)
+    def test_circ_inhom_qxqy(self):
+        ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=1)
+        w = DischargeWell(ml,xw=0,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
+        c1a = CircInhomDataMaq(ml,0,0,10,[10,2],[4,2,1,0],[200],[2e-3,2e-4],[1e-5])
+        c1 = CircInhom(ml,0,0,10,order=5)
+        ml.initialize()
+        x,y = 2.0,3.0
+        d = 1e-3
+        qx1,qy1 = c1.disinf(x,y) 
+        qxnum1 = (c1.potinf(x-d,y)-c1.potinf(x+d,y))/(2*d)
+        qynum1 = (c1.potinf(x,y-d)-c1.potinf(x,y+d))/(2*d)
+        print 'qx first term    ',qx1[0,0,0]
+        print 'qxnum first term ',qxnum1[0,0,0]
+        print 'qy first term    ',qy1[0,0,0]
+        print 'qynum first term ',qynum1[0,0,0]
+        x,y = 12.0,3.0
+        d = 1e-3
+        qx2,qy2 = c1.disinf(x,y) 
+        qxnum2 = (c1.potinf(x-d,y)-c1.potinf(x+d,y))/(2*d)
+        qynum2 = (c1.potinf(x,y-d)-c1.potinf(x,y+d))/(2*d)
+        print 'qx first term    ',qx2[c1.Nparam/2,0,0]
+        print 'qxnum first term ',qxnum2[c1.Nparam/2,0,0]
+        print 'qy first term    ',qy2[c1.Nparam/2,0,0]
+        print 'qynum first term ',qynum2[c1.Nparam/2,0,0]
+        np.testing.assert_allclose(qx1,qxnum1,rtol=1e-5,atol=1e-12)
+        np.testing.assert_allclose(qy1,qynum1,rtol=1e-5,atol=1e-12)
+        np.testing.assert_allclose(qx2,qxnum2,rtol=1e-5,atol=1e-12)
+        np.testing.assert_allclose(qy2,qynum2,rtol=1e-5,atol=1e-12)
+    def test_circ_inhom_with_well(self):
+        ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
+        w = DischargeWell(ml,xw=5,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
+        c1a = CircInhomDataMaq(ml,0,0,10,[10,2],[4,2,1,0],[200],[2e-3,2e-4],[1e-5])
+        c1 = CircInhom(ml,0,0,10,order=8)
+        ml.solve()       
+        a = c1.thetacp
+        d = 1e-4
+        x1 = (10-d)*np.cos(a)
+        y1 = (10-d)*np.sin(a)
+        x2 = (10+d)*np.cos(a)
+        y2 = (10+d)*np.sin(a)
+        h1 = ml.headalongline(x1,y1,2)
+        h2 = ml.headalongline(x2,y2,2)
+        hc = ml.headalongline(c1.xc,c1.yc,2)
+        qx1,qy1 = np.zeros((2,c1.Ncp)),np.zeros((2,c1.Ncp))
+        qx2,qy2 = np.zeros((2,c1.Ncp)),np.zeros((2,c1.Ncp))
+        for i in range(c1.Ncp):
+            qx1[:,i][:,np.newaxis],qy1[:,i][:,np.newaxis] = ml.discharge(x1[i],y1[i],2)
+            qx2[:,i][:,np.newaxis],qy2[:,i][:,np.newaxis] = ml.discharge(x2[i],y2[i],2)
+        qn1 = qx1*np.cos(a) + qy1*np.sin(a)
+        qn2 = qx2*np.cos(a) + qy2*np.sin(a)
+        np.testing.assert_allclose(h1,h2,rtol=1e-4,atol=1e-8)
+        np.testing.assert_allclose(qn1,qn2,rtol=1e-4,atol=1e-8)
+
+
 
 #
 #if __name__ == '__main__':

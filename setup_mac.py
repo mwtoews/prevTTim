@@ -28,7 +28,7 @@ pyver = 7
 
 setup (name = "ttim",
 	   extra_path = 'ttim',
-	   version = "0.2",
+	   version = "0.21",
 	   author="Mark Bakker",
 	   author_email="mark.bakker@tudelft.nl",
 	   py_modules = ["ttim"],
