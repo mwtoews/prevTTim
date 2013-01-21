@@ -11,6 +11,7 @@ from scipy.special import kv,iv # Needed for K1 in Well class, and in CircInhom
 from cmath import tanh as cmath_tanh
 import inspect # Used for storing the input
 import os
+from mathieu_functions import mathieu
 
 __version__ = 0.21
 
@@ -489,6 +490,45 @@ class CircInhomDataMaq(AquiferData):
         rv = False
         if (x-self.x0)**2 + (y-self.y0)**2 < self.Rsq: rv = True
         return rv
+    
+class EllipseInhomDataMaq(AquiferData):
+    def __init__(self,model,x0=0,y0=0,along=2.0,bshort=1.0,angle=0.0,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False):
+        kaq,Haq,c,Saq,Sll = param_maq(kaq,z,c,Saq,Sll,topboundary,phreatictop)
+        AquiferData.__init__(self,model,kaq,Haq,c,Saq,Sll,topboundary)
+        self.x0, self.y0, self.along, self.bshort, self.angle = float(x0), float(y0), float(along), float(bshort), float(angle)
+        assert self.along > self.bshort, "TTim Input error: Long axis of ellipse must be larger than short axis"
+        self.cosal = np.cos(self.angle); self.sinal = np.sin(self.angle)
+        self.dfoc = 2.0 * np.sqrt( self.along**2 - self.bshort**2 )  # focal length
+        self.afoc = self.dfoc / 2.0  # half the focal length
+        self.etastar = np.arccosh( self.along / self.afoc )
+        self.z0 = self.x0 + self.y0*1j
+        self.area = 1.0 # Needs to be implemented; Used in finding an inhomogeneity
+        self.model.addInhom(self)
+    def initialize(self):
+        AquiferData.initialize(self)
+        # q = -L^2 / (4^2 * lab^2) where L is focal length
+        self.q =  self.dfoc**2 / (16.0 * self.lab**2)
+    def isInside(self,x,y):
+        eta,psi = self.xytoetapsi(x,y)
+        return eta < self.etastar
+    def xytoetapsi(self,x,y):
+        Z = (x+y*1j - self.z0) * np.exp( -1j * self.angle )
+        tau = np.log( Z / self.afoc + np.sqrt( Z/self.afoc - 1 ) * np.sqrt( Z/self.afoc + 1 ) )
+        return tau.real,tau.imag
+    def etapsitoxy(self,eta,psi):
+        xloc = self.afoc * np.cosh(eta) * np.cos(psi)
+        yloc = self.afoc * np.sinh(eta) * np.sin(psi)
+        x = xloc * self.cosal - yloc * self.sinal + self.x0
+        y = xloc * self.sinal + yloc * self.cosal + self.y0
+        return x,y
+    def outwardnormal(self,x,y):
+        eta,psi = self.xytoetapsi(x,y)
+        alpha = np.arctan2( np.cosh(eta)*np.sin(psi), np.sinh(eta)*np.cos(psi) ) + self.angle
+        return np.cos(alpha), np.sin(alpha)
+    def outwardnormalangle(self,x,y):
+        eta,psi = self.xytoetapsi(x,y)
+        alpha = np.arctan2( np.cosh(eta)*np.sin(psi), np.sinh(eta)*np.cos(psi) ) + self.angle
+        return alpha
   
 class Element:
     def __init__(self, model, Nparam=1, Nunknowns=0, layers=1, tsandbc=[(0.0,0.0)], type='z', name='', label=None):
@@ -1090,7 +1130,7 @@ class CircInhom(Element,InhomEquation):
         self.thetacp = np.arange(0,2*np.pi,(2*np.pi)/self.Ncp)
         self.xc = self.x0 + self.R * np.cos( self.thetacp )
         self.yc = self.x0 + self.R * np.sin( self.thetacp )
-        self.aqin = self.model.aq.findAquiferData(self.x0+(1.0-1e-8)*self.R,self.y0)
+        self.aqin = self.model.aq.findAquiferData(self.x0,self.y0)
         self.aqout = self.model.aq.findAquiferData(self.x0+(1.0+1e-8)*self.R,self.y0)
         # Now that aqin is know, check that radii of circles are the same
         assert self.aqin.R == self.R, 'TTim Input Error: Radius of CircInhom and CircInhomData must be equal'
@@ -1196,6 +1236,124 @@ class CircInhom(Element,InhomEquation):
     def layout(self):
         return 'line', self.x0 + self.R * np.cos(np.linspace(0,2*np.pi,100)), self.y0 + self.R * np.sin(np.linspace(0,2*np.pi,100))
 
+class EllipseInhom(Element,InhomEquation):
+    def __init__(self,model,x0=0,y0=0,along=2.0,bshort=1.0,angle=0.0,order=0,label=None):
+        Element.__init__(self, model, Nparam=2*model.aq.Naq*(2*order+1), Nunknowns=2*model.aq.Naq*(2*order+1), layers=range(1,model.aq.Naq+1), \
+                         type='z', name='EllipseInhom', label=label)
+        self.x0, self.y0, self.along, self.bshort, self.angle = float(x0), float(y0), float(along), float(bshort), float(angle)
+        self.order = order
+        self.model.addElement(self)
+    def __repr__(self):
+        return self.name + ' at ' + str((self.x0,self.y0))
+    def initialize(self):
+        self.aqin = self.model.aq.findAquiferData(self.x0,self.y0)
+        self.aqout = self.model.aq.findAquiferData(self.x0+(1.0+1e-8)*self.along,self.y0)
+        self.qin =   self.aqin.dfoc**2 / (16.0 * self.aqin.lab**2)
+        self.qout =  self.aqin.dfoc**2 / (16.0 * self.aqout.lab**2)
+        self.xytoetapsi = self.aqin.xytoetapsi
+        self.etapsitoxy = self.aqin.etapsitoxy
+        self.etastar = self.aqin.etastar
+        self.afoc = self.aqin.afoc;
+        self.Ncp = 2*self.order + 1
+        psicp = np.arange(0,2*np.pi-1e-8,2*np.pi/self.Ncp)
+        self.xc, self.yc = self.etapsitoxy(self.etastar, psicp)
+        self.thetacp = self.aqin.outwardnormalangle(self.xc,self.yc)
+        self.setbc()
+        self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
+        self.mfin = [] # list with mathieu function objects
+        self.mfout = []
+        for i in range(self.aqin.Naq):
+            rowin = []
+            rowout = []
+            for j in range(self.model.Np):
+                rowin.append(mathieu(self.qin[i,j]))
+                rowout.append(mathieu(self.qout[i,j]))
+            self.mfin.append(rowin)
+            self.mfout.append(rowout)
+        self.neven = [0] + range(1,2*self.order,2)
+        self.nodd  = range(2,2*self.order+1,2)
+        self.norder = range(self.order+1)
+    def potinf(self,x,y,aq=None,test=1):
+        '''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rv = np.zeros((2*aq.Naq,1+2*self.order,aq.Naq,self.model.Np),'D')
+        if aq == self.aqin:
+            eta,psi = self.xytoetapsi(x,y)
+            for i in range(self.aqin.Naq):
+                for j in range(self.model.Np):
+                    if True:  # Need a condition here when we set the function to zero
+                        #Faster if all orders computed at the same time
+                        #rv[i,0,i,j] = self.mfin[i][j].ce(0,psi) * self.mfin[i][j].Ie(0,eta)
+                        #for n in range(1,self.order+1):
+                        #    rv[i,2*n-1,i,j] = self.mfin[i][j].ce(n,psi) * self.mfin[i][j].Ie(n,eta)
+                        #    rv[i,2*n  ,i,j] = self.mfin[i][j].se(n,psi) * self.mfin[i][j].Io(n,eta)
+                        rv[i,self.neven,i,j] = self.mfin[i][j].ce(self.norder,psi)     * self.mfin[i][j].Ie(self.norder,eta)
+                        rv[i,self.nodd ,i,j] = self.mfin[i][j].se(self.norder[1:],psi) * self.mfin[i][j].Io(self.norder[1:],eta)                            
+        if aq == self.aqout:
+            eta,psi = self.xytoetapsi(x,y)
+            for i in range(self.aqout.Naq):
+                for j in range(self.model.Np):
+                    if True: # Need a condition here when we set the function to zero
+                        rv[aq.Naq+i,self.neven,i,j] = self.mfout[i][j].ce(self.norder,psi)     * self.mfout[i][j].Ke(self.norder,eta)
+                        rv[aq.Naq+i,self.nodd ,i,j] = self.mfout[i][j].se(self.norder[1:],psi) * self.mfout[i][j].Ko(self.norder[1:],eta)
+        rv.shape = (self.Nparam,aq.Naq,self.model.Np)
+        return rv
+    def disinf(self,x,y,aq=None):
+        '''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        qx = np.zeros((self.Nparam,aq.Naq,self.model.Np),'D')
+        qy = np.zeros((self.Nparam,aq.Naq,self.model.Np),'D')
+        if aq == self.aqin:
+            eta,psi = self.xytoetapsi(x,y)
+            qeta = np.zeros((aq.Naq,1+2*self.order,aq.Naq,self.model.Np),'D')
+            qpsi = np.zeros((aq.Naq,1+2*self.order,aq.Naq,self.model.Np),'D')
+            for i in range(self.aqin.Naq):
+                for j in range(self.model.Np):
+                    if True:  # Need a condition here when we set the function to zero
+                        ## Faster if all orders pre-computed? ce = mf[i,j].ce(range(self.order+1))
+                        #qeta[i,0,i,j] = self.mfin[i][j].ce(0,psi) * self.mfin[i][j].dIe(0,eta)
+                        #qpsi[i,0,i,j] = self.mfin[i][j].dce(0,psi) * self.mfin[i][j].Ie(0,eta)
+                        #for n in range(1,self.order+1):
+                        #    qeta[i,2*n-1,i,j] = self.mfin[i][j].ce(n,psi) * self.mfin[i][j].dIe(n,eta)
+                        #    qeta[i,2*n  ,i,j] = self.mfin[i][j].se(n,psi) * self.mfin[i][j].dIo(n,eta)
+                        #    qpsi[i,2*n-1,i,j] = self.mfin[i][j].dce(n,psi) * self.mfin[i][j].Ie(n,eta)
+                        #    qpsi[i,2*n  ,i,j] = self.mfin[i][j].dse(n,psi) * self.mfin[i][j].Io(n,eta)
+                        # Faster if all orders pre-computed? ce = mf[i,j].ce(range(self.order+1))
+                        qeta[i,self.neven,i,j] = self.mfin[i][j].ce(self.norder,psi)     * self.mfin[i][j].dIe(self.norder,eta)
+                        qeta[i,self.nodd ,i,j] = self.mfin[i][j].se(self.norder[1:],psi) * self.mfin[i][j].dIo(self.norder[1:],eta)
+                        qpsi[i,self.neven,i,j] = self.mfin[i][j].dce(self.norder,psi)     * self.mfin[i][j].Ie(self.norder,eta)
+                        qpsi[i,self.nodd ,i,j] = self.mfin[i][j].dse(self.norder[1:],psi) * self.mfin[i][j].Io(self.norder[1:],eta)
+            qeta.shape = (self.Nparam/2,aq.Naq,self.model.Np)
+            qpsi.shape = (self.Nparam/2,aq.Naq,self.model.Np)
+            factor = -1.0 / ( self.afoc * np.sqrt( np.cosh(eta)**2 - np.cos(psi)**2 ) )
+            cosangle,sinangle = self.aqin.outwardnormal(x,y)
+            qx[:self.Nparam/2,:,:] = factor * ( qeta * cosangle - qpsi * sinangle )
+            qy[:self.Nparam/2,:,:] = factor * ( qeta * sinangle + qpsi * cosangle )
+        if aq == self.aqout:
+            eta,psi = self.xytoetapsi(x,y)
+            qeta = np.zeros((aq.Naq,1+2*self.order,aq.Naq,self.model.Np),'D')
+            qpsi = np.zeros((aq.Naq,1+2*self.order,aq.Naq,self.model.Np),'D')
+            for i in range(self.aqin.Naq):
+                for j in range(self.model.Np):
+                    if True:  # Need a condition here when we set the function to zero
+                            qeta[i,self.neven,i,j] = self.mfout[i][j].ce(self.norder,psi)     * self.mfout[i][j].dKe(self.norder,eta)
+                            qeta[i,self.nodd ,i,j] = self.mfout[i][j].se(self.norder[1:],psi) * self.mfout[i][j].dKo(self.norder[1:],eta)
+                            qpsi[i,self.neven,i,j] = self.mfout[i][j].dce(self.norder,psi)     * self.mfout[i][j].Ke(self.norder,eta)
+                            qpsi[i,self.nodd ,i,j] = self.mfout[i][j].dse(self.norder[1:],psi) * self.mfout[i][j].Ko(self.norder[1:],eta)
+            qeta.shape = (self.Nparam/2,aq.Naq,self.model.Np)
+            qpsi.shape = (self.Nparam/2,aq.Naq,self.model.Np)
+            factor = -1.0 / ( self.afoc * np.sqrt( np.cosh(eta)**2 - np.cos(psi)**2 ) )
+            cosangle,sinangle = self.aqin.outwardnormal(x,y)
+            qx[self.Nparam/2:,:,:] = factor * ( qeta * cosangle - qpsi * sinangle )
+            qy[self.Nparam/2:,:,:] = factor * ( qeta * sinangle + qpsi * cosangle )        
+        return qx,qy
+    def layout(self):
+        theta = arange(0,2*pi+0.001,pi/50)
+        return [ list( self.etapsitoxy(self.etastar,theta)[0] ), list( self.etapsitoxy(self.etastar,theta)[1] ) ]
+    def layout(self):
+        psi = np.linspace(0,2*np.pi,100)
+        x,y = self.etapsitoxy(self.etastar,psi)
+        return 'line', x, y
 
 class WellBase(Element):
     '''Well Base Class. All Well elements are derived from this class'''
@@ -2009,32 +2167,21 @@ def timlayout( ml, ax = None, color = 'k', lw = 0.5, style = '-' ):
 
 
 ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
-#ml = ModelMaq(kaq=[4],z=[1,0],Saq=[1e-3],tmin=1,tmax=10,M=1)
-w = DischargeWell(ml,xw=5,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
-c1a = CircInhomDataMaq(ml,0,0,10,[10,2],[4,2,1,0],[200],[2e-3,2e-4],[1e-5])
-#c1a = CircInhomDataMaq(ml,0,0,10,[10],[1,0],Saq=[2e-3])
-c1 = CircInhom(ml,0,0,10,order=8)
-#c1 = CircInhomRadial(ml,0,0,10.0)
-#ml.initialize()
-ml.solve()
-
-a = c1.thetacp
-d = 1e-4
-x1 = (10-d)*np.cos(a)
-y1 = (10-d)*np.sin(a)
-x2 = (10+d)*np.cos(a)
-y2 = (10+d)*np.sin(a)
-h1 = ml.headalongline(x1,y1,2)
-h2 = ml.headalongline(x2,y2,2)
-hc = ml.headalongline(c1.xc,c1.yc,2)
-qx1,qy1 = np.zeros((2,c1.Ncp)),np.zeros((2,c1.Ncp))
-qx2,qy2 = np.zeros((2,c1.Ncp)),np.zeros((2,c1.Ncp))
-for i in range(c1.Ncp):
-    qx1[:,i][:,np.newaxis],qy1[:,i][:,np.newaxis] = ml.discharge(x1[i],y1[i],2)
-    qx2[:,i][:,np.newaxis],qy2[:,i][:,np.newaxis] = ml.discharge(x2[i],y2[i],2)
-qn1 = qx1*np.cos(a) + qy1*np.sin(a)
-qn2 = qx2*np.cos(a) + qy2*np.sin(a)
-
+w = DischargeWell(ml,xw=.5,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
+ls = MscreenLineSinkDitchString(ml,[(-1,0),(0,0),(1,0)],tsandQ=[(0.0,1.0)],layers=[2])
+e1a = EllipseInhomDataMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+e1 = EllipseInhom(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5)
+ml.solve()       
+#h1,h2 = np.zeros((2,e1.Ncp)), np.zeros((2,e1.Ncp))
+#qn1,qn2 = np.zeros((2,e1.Ncp)), np.zeros((2,e1.Ncp))
+#for i in range(e1.Ncp):
+#    h1[:,i] = ml.head(e1.xc[i],e1.yc[i],2,aq=e1.aqin)[:,0]
+#    h2[:,i] = ml.head(e1.xc[i],e1.yc[i],2,aq=e1.aqout)[:,0]
+#    qx1,qy1 = ml.discharge(e1.xc[i],e1.yc[i],2,aq=e1.aqin)
+#    qx2,qy2 = ml.discharge(e1.xc[i],e1.yc[i],2,aq=e1.aqout)
+#    a = e1a.outwardnormalangle(e1.xc[i],e1.yc[i])
+#    qn1[:,i] = qx1[:,0]*np.cos(a) + qy1[:,0]*np.sin(a)
+#    qn2[:,i] = qx2[:,0]*np.cos(a) + qy2[:,0]*np.sin(a)
 
 
 
