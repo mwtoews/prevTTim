@@ -465,22 +465,8 @@ class Aquifer(AquiferData):
                     rv = aq
         return rv
     
-class CircInhomData3D(AquiferData):
-    def __init__(self,model,x0=0,y0=0,R=1,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True):
-        kaq,Haq,c,Saq,Sll = param_3d(kaq,z,Saq,kzoverkh,phreatictop)
-        AquiferData.__init__(self,model,kaq,Haq,c,Saq,Sll,'imp')
-        self.x0, self.y0, self.R = float(x0), float(y0), float(R)
-        self.Rsq = self.R**2
-        self.area = np.pi * self.Rsq
-        self.model.addInhom(self)
-    def isInside(self,x,y):
-        rv = False
-        if (x-self.x0)**2 + (y-self.y0)**2 < self.Rsq: rv = True
-        return rv
-
-class CircInhomDataMaq(AquiferData):
-    def __init__(self,model,x0=0,y0=0,R=1,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False):
-        kaq,Haq,c,Saq,Sll = param_maq(kaq,z,c,Saq,Sll,topboundary,phreatictop)
+class CircInhomData(AquiferData):
+    def __init__(self,model,x0=0,y0=0,R=1,kaq=[1],Haq=[1],c=[1],Saq=[.1],Sll=[.1],topboundary='imp'):
         AquiferData.__init__(self,model,kaq,Haq,c,Saq,Sll,topboundary)
         self.x0, self.y0, self.R = float(x0), float(y0), float(R)
         self.Rsq = self.R**2
@@ -490,6 +476,17 @@ class CircInhomDataMaq(AquiferData):
         rv = False
         if (x-self.x0)**2 + (y-self.y0)**2 < self.Rsq: rv = True
         return rv
+
+class CircInhomDataMaq(CircInhomData):
+    def __init__(self,model,x0=0,y0=0,R=1,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False):
+        kaq,Haq,c,Saq,Sll = param_maq(kaq,z,c,Saq,Sll,topboundary,phreatictop)
+        CircInhomData.__init__(self,model,x0,y0,R,kaq,Haq,c,Saq,Sll,topboundary)
+
+    
+class CircInhomData3D(AquiferData):
+    def __init__(self,model,x0=0,y0=0,R=1,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True):
+        kaq,Haq,c,Saq,Sll = param_3d(kaq,z,Saq,kzoverkh,phreatictop)
+        CircInhomData.__init__(self,model,x0,y0,R,kaq,Haq,c,Saq,Sll,'imp')
     
 class EllipseInhomDataMaq(AquiferData):
     def __init__(self,model,x0=0,y0=0,along=2.0,bshort=1.0,angle=0.0,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False):
@@ -983,41 +980,37 @@ class BesselRatioApprox:
         self.hankeln2kp1 = self.hankeltot[:,1::2]
     def ivratio( self, rho, R, lab):
         lab = np.atleast_1d(lab)
-        rv = np.empty_like(lab)
+        rv = np.empty((self.Norder,len(lab)),'D')
         for k in range(len(lab)):
             top = np.sum( self.minonek * self.hankelnk / ( 2.0 * rho / lab[k] )**self.krange, 1 )
             bot = np.sum( self.minonek * self.hankelnk / ( 2.0 * R / lab[k] )**self.krange, 1 )
-            dummy = top / bot * np.sqrt ( float(R) / rho ) * np.exp( (rho-R)/ lab[k] )
-            rv[k] = dummy[0] # Bug in numpy
+            rv[:,k] = top / bot * np.sqrt ( float(R) / rho ) * np.exp( (rho-R)/ lab[k] )
         return rv
     def kvratio( self, rho, R, lab ):
         lab = np.atleast_1d(lab)
-        rv = np.empty_like(lab)
+        rv = np.empty((self.Norder,len(lab)),'D')
         for k in range(len(lab)):
             top = np.sum( self.hankelnk / ( 2.0 * rho / lab[k] )**self.krange, 1 )
             bot = np.sum( self.hankelnk / ( 2.0 * R / lab[k] )**self.krange, 1 )
-            dummy = top / bot * np.sqrt ( R / rho ) * np.exp( (R-rho)/ lab[k] )
-            rv[k] = dummy[0]
+            rv[:,k] = top / bot * np.sqrt ( float(R) / rho ) * np.exp( (R-rho)/ lab[k] )
         return rv    
     def ivratiop( self, rho, R, lab ):
         lab = np.atleast_1d(lab)
-        rv = np.empty_like(lab)
+        rv = np.empty((self.Norder,len(lab)),'D')
         for k in range(len(lab)):
             top = np.sum( self.muk * self.hankeln2k / ( 2.0 * rho / lab[k] )**(2*self.krange), 1 ) - \
                   np.sum( self.nuk * self.hankeln2kp1 / ( 2.0 * rho / lab[k] )**(2*self.krange+1), 1 )
             bot = np.sum( self.minonek * self.hankelnk / ( 2.0 * R / lab[k] )**self.krange, 1 )
-            dummy = top / bot * np.sqrt ( float(R) / rho ) * np.exp( (rho-R)/ lab[k] )
-            rv[k] = dummy[0]
+            rv[:,k] = top / bot * np.sqrt ( float(R) / rho ) * np.exp( (rho-R)/ lab[k] )
         return rv
     def kvratiop( self, rho, R, lab ):
         lab = np.atleast_1d(lab)
-        rv = np.empty_like(lab)
+        rv = np.empty((self.Norder,len(lab)),'D')
         for k in range(len(lab)):
             top = np.sum( self.muk * self.hankeln2k / ( 2.0 * rho / lab[k] )**(2*self.krange), 1 ) + \
                   np.sum( self.nuk * self.hankeln2kp1 / ( 2.0 * rho / lab[k] )**(2*self.krange+1), 1 )
             bot = np.sum( self.hankelnk / ( 2.0 * R / lab[k] )**self.krange, 1 )
-            dummy = -top / bot * np.sqrt ( float(R) / rho ) * np.exp( (R-rho)/ lab[k] )
-            rv[k] = dummy[0]
+            rv[:,k] = -top / bot * np.sqrt ( float(R) / rho ) * np.exp( (R-rho)/ lab[k] )
         return rv
     
 class CircInhomRadial(Element,InhomEquation):
@@ -1117,11 +1110,22 @@ class CircInhomRadial(Element,InhomEquation):
     def layout(self):
         return 'line', self.x0 + self.R * np.cos(np.linspace(0,2*np.pi,100)), self.y0 + self.R * np.sin(np.linspace(0,2*np.pi,100))
 
+
+def CircInhomMaq(model,x0=0,y0=0,R=1,order=1,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False,label=None,test=False):
+    CircInhomDataMaq(model,x0,y0,R,kaq,z,c,Saq,Sll,topboundary,phreatictop)
+    return CircInhom(model,x0,y0,R,order,label,test)
+    
+def CircInhom3D(self,model,x0=0,y0=0,R=1,order=1,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True,label=None):
+    CircInhomData3D(model,x0,y0,R,kaq,z,Saq,kzoverkh,phreatictop)       
+    return CircInhom(model,x0,y0,R,order,label)
+                
 class CircInhom(Element,InhomEquation):
-    def __init__(self,model,x0=0,y0=0,R=1.0,order=0,label=None):
+    def __init__(self,model,x0=0,y0=0,R=1.0,order=0,label=None,test=False):
         Element.__init__(self, model, Nparam=2*model.aq.Naq*(2*order+1), Nunknowns=2*model.aq.Naq*(2*order+1), layers=range(1,model.aq.Naq+1), type='z', name='CircInhom', label=label)
         self.x0 = float(x0); self.y0 = float(y0); self.R = float(R)
         self.order = order
+        self.approx = BesselRatioApprox(0,3)
+        self.test=test
         self.model.addElement(self)
     def __repr__(self):
         return self.name + ' at ' + str((self.x0,self.y0))
@@ -1135,23 +1139,29 @@ class CircInhom(Element,InhomEquation):
         # Now that aqin is know, check that radii of circles are the same
         assert self.aqin.R == self.R, 'TTim Input Error: Radius of CircInhom and CircInhomData must be equal'
         self.setbc()
-        self.facin = np.zeros_like(self.aqin.lab2)
-        self.facout = np.zeros_like(self.aqout.lab2)
+        self.facin = np.zeros((self.order+1,self.aqin.Naq,self.model.Nin,self.model.Npin),dtype='D')
+        self.facout = np.zeros((self.order+1,self.aqin.Naq,self.model.Nin,self.model.Npin),dtype='D')
         self.circ_in_small = np.zeros((self.aqin.Naq,self.model.Nin),dtype='i') # To keep track which circles are small
         self.circ_out_small = np.zeros((self.aqout.Naq,self.model.Nin),dtype='i')
-        self.Rbig = 700
+        self.besapprox = BesselRatioApprox(self.order,2) # Nterms = 2 is probably enough
+        self.Rbig = 200
         for i in range(self.aqin.Naq):
             for j in range(self.model.Nin):
                 # When the circle is too big, an assertion is thrown. In the future, the approximation of the ratio of bessel functions needs to be completed
                 # For now, the logic is there, but not used
-                assert self.R / abs(self.aqin.lab2[i,j,0]) < self.Rbig, 'TTim input error, Radius too big'
-                assert self.R / abs(self.aqout.lab2[i,j,0]) < self.Rbig, 'TTim input error, Radius too big'
+                if self.test:
+                    print 'inside  relative radius: ',self.R / abs(self.aqin.lab2[i,j,0])
+                    print 'outside relative radius: ',self.R / abs(self.aqout.lab2[i,j,0])
+                #assert self.R / abs(self.aqin.lab2[i,j,0]) < self.Rbig, 'TTim input error, Radius too big'
+                #assert self.R / abs(self.aqout.lab2[i,j,0]) < self.Rbig, 'TTim input error, Radius too big'
                 if self.R / abs(self.aqin.lab2[i,j,0]) < self.Rbig:
                     self.circ_in_small[i,j] = 1
-                    self.facin[i,j,:] = 1.0 / iv(0, self.R / self.aqin.lab2[i,j,:])
+                    for n in range(self.order+1):
+                        self.facin[n,i,j,:] = 1.0 / iv(n, self.R / self.aqin.lab2[i,j,:])
                 if self.R / abs(self.aqout.lab2[i,j,0]) < self.Rbig:
                     self.circ_out_small[i,j] = 1
-                    self.facout[i,j,:] = 1.0 / kv(0, self.R / self.aqout.lab2[i,j,:])
+                    for n in range(self.order+1):
+                        self.facout[n,i,j,:] = 1.0 / kv(n, self.R / self.aqout.lab2[i,j,:])
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
     def potinf(self,x,y,aq=None):
         '''Can be called with only one x,y value'''
@@ -1163,24 +1173,38 @@ class CircInhom(Element,InhomEquation):
             for i in range(self.aqin.Naq):
                 for j in range(self.model.Nin):
                     if abs(r-self.R) / abs(self.aqin.lab2[i,j,0]) < self.Rzero:
-                        pot = np.zeros((self.model.Npin),'D')
-                        rv[i,0,i,j,:] = iv( 0, r / self.aqin.lab2[i,j,:] )
-                        for n in range(1,self.order+1):
-                            pot[:] = iv( n, r / self.aqin.lab2[i,j,:] )
-                            rv[i,2*n-1,i,j,:] = pot * np.cos(n*alpha)
-                            rv[i,2*n  ,i,j,:] = pot * np.sin(n*alpha)
+                        if self.circ_in_small[i,j]:
+                            pot = np.zeros((self.model.Npin),'D')
+                            rv[i,0,i,j,:] = iv( 0, r / self.aqin.lab2[i,j,:] ) * self.facin[0,i,j,:]
+                            for n in range(1,self.order+1):
+                                pot[:] = iv( n, r / self.aqin.lab2[i,j,:] ) * self.facin[n,i,j,:]
+                                rv[i,2*n-1,i,j,:] = pot * np.cos(n*alpha)
+                                rv[i,2*n  ,i,j,:] = pot * np.sin(n*alpha)
+                        else:
+                            pot = self.besapprox.ivratio(r,self.R,self.aqin.lab2[i,j,:])
+                            rv[i,0,i,j,:] = pot[0]
+                            for n in range(1,self.order+1):
+                                rv[i,2*n-1,i,j,:] = pot[n] * np.cos(n*alpha)
+                                rv[i,2*n  ,i,j,:] = pot[n] * np.sin(n*alpha)
         if aq == self.aqout:
             r = np.sqrt( (x-self.x0)**2 + (y-self.y0)**2 )
             alpha = np.arctan2(y-self.y0, x-self.x0)
             for i in range(self.aqout.Naq):
                 for j in range(self.model.Nin):
                     if abs(r-self.R) / abs(self.aqout.lab2[i,j,0]) < self.Rzero:
-                        pot = np.zeros((self.model.Npin),'D')
-                        rv[aq.Naq+i,0,i,j,:] = kv( 0, r / self.aqout.lab2[i,j,:] )
-                        for n in range(1,self.order+1):
-                            pot[:] = kv( n, r / self.aqout.lab2[i,j,:] )
-                            rv[aq.Naq+i,2*n-1,i,j,:] = pot * np.cos(n*alpha)
-                            rv[aq.Naq+i,2*n  ,i,j,:] = pot * np.sin(n*alpha)
+                        if self.circ_out_small[i,j]:
+                            pot = np.zeros((self.model.Npin),'D')
+                            rv[aq.Naq+i,0,i,j,:] = kv( 0, r / self.aqout.lab2[i,j,:] ) * self.facout[0,i,j,:]
+                            for n in range(1,self.order+1):
+                                pot[:] = kv( n, r / self.aqout.lab2[i,j,:] ) * self.facout[n,i,j,:]
+                                rv[aq.Naq+i,2*n-1,i,j,:] = pot * np.cos(n*alpha)
+                                rv[aq.Naq+i,2*n  ,i,j,:] = pot * np.sin(n*alpha)
+                        else:
+                            pot = self.besapprox.kvratio(r,self.R,self.aqout.lab2[i,j,:])
+                            rv[aq.Naq+i,0,i,j,:] = pot[0]
+                            for n in range(1,self.order+1):
+                                rv[aq.Naq+i,2*n-1,i,j,:] = pot[n] * np.cos(n*alpha)
+                                rv[aq.Naq+i,2*n  ,i,j,:] = pot[n] * np.sin(n*alpha)
         rv.shape = (self.Nparam,aq.Naq,self.model.Np)
         return rv
     def disinf(self,x,y,aq=None):
@@ -1197,15 +1221,25 @@ class CircInhom(Element,InhomEquation):
             for i in range(self.aqin.Naq):
                 for j in range(self.model.Nin):
                     if abs(r-self.R) / abs(self.aqin.lab2[i,j,0]) < self.Rzero:
-                        pot = np.zeros((self.order+2,self.model.Npin),'D')
-                        for n in range(self.order+2):
-                            pot[n] = iv( n, r / self.aqin.lab2[i,j,:] )
-                        qr[i,0,i,j,:] = -pot[1] / self.aqin.lab2[i,j,:]
-                        for n in range(1,self.order+1):
-                            qr[i,2*n-1,i,j,:] = -(pot[n-1] + pot[n+1]) / 2 / self.aqin.lab2[i,j,:] * np.cos(n*alpha)
-                            qr[i,2*n  ,i,j,:] = -(pot[n-1] + pot[n+1]) / 2 / self.aqin.lab2[i,j,:] * np.sin(n*alpha)
-                            qt[i,2*n-1,i,j,:] =   pot[n] * np.sin(n*alpha) * n / r
-                            qt[i,2*n  ,i,j,:] =  -pot[n] * np.cos(n*alpha) * n / r
+                        if self.circ_in_small[i,j]:
+                            pot = np.zeros((self.order+2,self.model.Npin),'D')
+                            for n in range(self.order+2):
+                                pot[n] = iv( n, r / self.aqin.lab2[i,j,:] )
+                            qr[i,0,i,j,:] = -pot[1] / self.aqin.lab2[i,j,:] * self.facin[0,i,j,:]
+                            for n in range(1,self.order+1):
+                                qr[i,2*n-1,i,j,:] = -(pot[n-1] + pot[n+1]) / 2 / self.aqin.lab2[i,j,:] * np.cos(n*alpha) * self.facin[n,i,j,:]
+                                qr[i,2*n  ,i,j,:] = -(pot[n-1] + pot[n+1]) / 2 / self.aqin.lab2[i,j,:] * np.sin(n*alpha) * self.facin[n,i,j,:] 
+                                qt[i,2*n-1,i,j,:] =   pot[n] * np.sin(n*alpha) * n / r * self.facin[n,i,j,:]
+                                qt[i,2*n  ,i,j,:] =  -pot[n] * np.cos(n*alpha) * n / r * self.facin[n,i,j,:]
+                        else:
+                            pot  = self.besapprox.ivratio(r,self.R,self.aqin.lab2[i,j,:])
+                            potp = self.besapprox.ivratiop(r,self.R,self.aqin.lab2[i,j,:])
+                            qr[i,0,i,j,:] = -potp[0] / self.aqin.lab2[i,j,:]
+                            for n in range(1,self.order+1):
+                                qr[i,2*n-1,i,j,:] = -potp[n] / self.aqin.lab2[i,j,:] * np.cos(n*alpha)
+                                qr[i,2*n  ,i,j,:] = -potp[n] / 2 / self.aqin.lab2[i,j,:] * np.sin(n*alpha)
+                                qt[i,2*n-1,i,j,:] =  pot[n] * np.sin(n*alpha) * n / r
+                                qt[i,2*n  ,i,j,:] = -pot[n] * np.cos(n*alpha) * n / r
             qr.shape = (self.Nparam/2,aq.Naq,self.model.Np)
             qt.shape = (self.Nparam/2,aq.Naq,self.model.Np)
             qx[:self.Nparam/2,:,:] = qr * np.cos(alpha) - qt * np.sin(alpha);
@@ -1219,15 +1253,25 @@ class CircInhom(Element,InhomEquation):
             for i in range(self.aqout.Naq):
                 for j in range(self.model.Nin):
                     if abs(r-self.R) / abs(self.aqout.lab2[i,j,0]) < self.Rzero:
-                        pot = np.zeros((self.order+2,self.model.Npin),'D')
-                        for n in range(self.order+2):
-                            pot[n] = kv( n, r / self.aqout.lab2[i,j,:] )
-                        qr[i,0,i,j,:] = pot[1] / self.aqout.lab2[i,j,:]
-                        for n in range(1,self.order+1):
-                            qr[i,2*n-1,i,j,:] = (pot[n-1] + pot[n+1]) / 2 / self.aqout.lab2[i,j,:] * np.cos(n*alpha)
-                            qr[i,2*n  ,i,j,:] = (pot[n-1] + pot[n+1]) / 2 / self.aqout.lab2[i,j,:] * np.sin(n*alpha)
-                            qt[i,2*n-1,i,j,:] =   pot[n] * np.sin(n*alpha) * n / r
-                            qt[i,2*n  ,i,j,:] =  -pot[n] * np.cos(n*alpha) * n / r
+                        if self.circ_out_small[i,j]:
+                            pot = np.zeros((self.order+2,self.model.Npin),'D')
+                            for n in range(self.order+2):
+                                pot[n] = kv( n, r / self.aqout.lab2[i,j,:] )
+                            qr[i,0,i,j,:] = pot[1] / self.aqout.lab2[i,j,:] * self.facout[0,i,j,:]
+                            for n in range(1,self.order+1):
+                                qr[i,2*n-1,i,j,:] = (pot[n-1] + pot[n+1]) / 2 / self.aqout.lab2[i,j,:] * np.cos(n*alpha) * self.facout[n,i,j,:]
+                                qr[i,2*n  ,i,j,:] = (pot[n-1] + pot[n+1]) / 2 / self.aqout.lab2[i,j,:] * np.sin(n*alpha) * self.facout[n,i,j,:]
+                                qt[i,2*n-1,i,j,:] =   pot[n] * np.sin(n*alpha) * n / r * self.facout[n,i,j,:]
+                                qt[i,2*n  ,i,j,:] =  -pot[n] * np.cos(n*alpha) * n / r * self.facout[n,i,j,:]
+                        else:
+                            pot  = self.besapprox.kvratio(r,self.R,self.aqout.lab2[i,j,:])
+                            potp = self.besapprox.kvratiop(r,self.R,self.aqout.lab2[i,j,:])
+                            qr[i,0,i,j,:] = -potp[0] / self.aqout.lab2[i,j,:]
+                            for n in range(1,self.order+1):
+                                qr[i,2*n-1,i,j,:] = -potp[n] / self.aqout.lab2[i,j,:] * np.cos(n*alpha)
+                                qr[i,2*n  ,i,j,:] = -potp[n] / self.aqout.lab2[i,j,:] * np.sin(n*alpha)
+                                qt[i,2*n-1,i,j,:] =  pot[n] * np.sin(n*alpha) * n / r
+                                qt[i,2*n  ,i,j,:] = -pot[n] * np.cos(n*alpha) * n / r
             qr.shape = (self.Nparam/2,aq.Naq,self.model.Np)
             qt.shape = (self.Nparam/2,aq.Naq,self.model.Np)
             qx[self.Nparam/2:,:,:] = qr * np.cos(alpha) - qt * np.sin(alpha);
@@ -1235,6 +1279,14 @@ class CircInhom(Element,InhomEquation):
         return qx,qy
     def layout(self):
         return 'line', self.x0 + self.R * np.cos(np.linspace(0,2*np.pi,100)), self.y0 + self.R * np.sin(np.linspace(0,2*np.pi,100))
+
+def EllipseInhomMaq(model,x0=0,y0=0,along=2.0,bshort=1.0,angle=0.0,order=1,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False,label=None):
+    EllipseInhomDataMaq(model,x0,y0,along,bshort,angle,kaq,z,c,Saq,Sll,topboundary,phreatictop)
+    return EllipseInhom(model,x0,y0,along,bshort,angle,order,label)
+    
+def EllipseInhom3D(self,model,x0=0,y0=0,along=2.0,bshort=1.0,angle=0.0,order=1,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True,label=None):
+    EllipseInhomData3D(model,x0,y0,along,bshort,angle,kaq,z,Saq,kzoverkh,phreatictop)       
+    return EllipseInhom(model,x0,y0,along,bshort,angle,order,label)
 
 class EllipseInhom(Element,InhomEquation):
     def __init__(self,model,x0=0,y0=0,along=2.0,bshort=1.0,angle=0.0,order=0,label=None):
@@ -1273,7 +1325,7 @@ class EllipseInhom(Element,InhomEquation):
         self.neven = [0] + range(1,2*self.order,2)
         self.nodd  = range(2,2*self.order+1,2)
         self.norder = range(self.order+1)
-    def potinf(self,x,y,aq=None,test=1):
+    def potinf(self,x,y,aq=None):
         '''Can be called with only one x,y value'''
         if aq is None: aq = self.model.aq.findAquiferData( x, y )
         rv = np.zeros((2*aq.Naq,1+2*self.order,aq.Naq,self.model.Np),'D')
@@ -2165,13 +2217,21 @@ def timlayout( ml, ax = None, color = 'k', lw = 0.5, style = '-' ):
 #lds = LeakyLineDoubletString(ml2,xy=[(-20,0),(20,0),(40,20)],res=4,order=2,layers=[1,2])
 #ml2.solve()
 
-
+#
 ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
-w = DischargeWell(ml,xw=.5,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
+#w = DischargeWell(ml,xw=.5,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
 ls = MscreenLineSinkDitchString(ml,[(-1,0),(0,0),(1,0)],tsandQ=[(0.0,1.0)],layers=[2])
-e1a = EllipseInhomDataMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
-e1 = EllipseInhom(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5)
-ml.solve()       
+#e1a = EllipseInhomDataMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+#e1 = EllipseInhom(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5)
+#e1 = EllipseInhomMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+c1 = CircInhomMaq(ml,0,0,2.0,order=5,kaq=[10,.1],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5],test=True)
+#c2 = CircInhomMaq(ml,0,0,5000.0,order=1,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+#ml.initialize()
+#c2.circ_in_small[:] = 0
+#c2.circ_out_small[:] = 0
+ml.solve()
+
+#ml.solve()       
 #h1,h2 = np.zeros((2,e1.Ncp)), np.zeros((2,e1.Ncp))
 #qn1,qn2 = np.zeros((2,e1.Ncp)), np.zeros((2,e1.Ncp))
 #for i in range(e1.Ncp):

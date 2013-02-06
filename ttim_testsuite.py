@@ -134,34 +134,34 @@ class TTimTest(unittest.TestCase):
     #    print 'qnum ',qnum
     #    np.testing.assert_almost_equal(qy1,qy1num,decimal=3)
     #    np.testing.assert_almost_equal(qnorm,qnum,decimal=3)
-    #def test_circ_inhom_qxqy(self):
-    #    ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=1)
-    #    w = DischargeWell(ml,xw=0,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
-    #    c1a = CircInhomDataMaq(ml,0,0,10,[10,2],[4,2,1,0],[200],[2e-3,2e-4],[1e-5])
-    #    c1 = CircInhom(ml,0,0,10,order=5)
-    #    ml.initialize()
-    #    x,y = 2.0,3.0
-    #    d = 1e-3
-    #    qx1,qy1 = c1.disinf(x,y) 
-    #    qxnum1 = (c1.potinf(x-d,y)-c1.potinf(x+d,y))/(2*d)
-    #    qynum1 = (c1.potinf(x,y-d)-c1.potinf(x,y+d))/(2*d)
-    #    print 'qx first term    ',qx1[0,0,0]
-    #    print 'qxnum first term ',qxnum1[0,0,0]
-    #    print 'qy first term    ',qy1[0,0,0]
-    #    print 'qynum first term ',qynum1[0,0,0]
-    #    x,y = 12.0,3.0
-    #    d = 1e-3
-    #    qx2,qy2 = c1.disinf(x,y) 
-    #    qxnum2 = (c1.potinf(x-d,y)-c1.potinf(x+d,y))/(2*d)
-    #    qynum2 = (c1.potinf(x,y-d)-c1.potinf(x,y+d))/(2*d)
-    #    print 'qx first term    ',qx2[c1.Nparam/2,0,0]
-    #    print 'qxnum first term ',qxnum2[c1.Nparam/2,0,0]
-    #    print 'qy first term    ',qy2[c1.Nparam/2,0,0]
-    #    print 'qynum first term ',qynum2[c1.Nparam/2,0,0]
-    #    np.testing.assert_allclose(qx1,qxnum1,rtol=1e-5,atol=1e-12)
-    #    np.testing.assert_allclose(qy1,qynum1,rtol=1e-5,atol=1e-12)
-    #    np.testing.assert_allclose(qx2,qxnum2,rtol=1e-5,atol=1e-12)
-    #    np.testing.assert_allclose(qy2,qynum2,rtol=1e-5,atol=1e-12)
+    def test_circ_inhom_qxqy(self):
+        ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=1)
+        w = DischargeWell(ml,xw=0,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
+        c1a = CircInhomDataMaq(ml,0,0,10,[10,2],[4,2,1,0],[200],[2e-3,2e-4],[1e-5])
+        c1 = CircInhom(ml,0,0,10,order=5)
+        ml.initialize()
+        x,y = 2.0,3.0
+        d = 1e-3
+        qx1,qy1 = c1.disinf(x,y) 
+        qxnum1 = (c1.potinf(x-d,y)-c1.potinf(x+d,y))/(2*d)
+        qynum1 = (c1.potinf(x,y-d)-c1.potinf(x,y+d))/(2*d)
+        print 'qx first term    ',qx1[0,0,0]
+        print 'qxnum first term ',qxnum1[0,0,0]
+        print 'qy first term    ',qy1[0,0,0]
+        print 'qynum first term ',qynum1[0,0,0]
+        x,y = 12.0,3.0
+        d = 1e-3
+        qx2,qy2 = c1.disinf(x,y) 
+        qxnum2 = (c1.potinf(x-d,y)-c1.potinf(x+d,y))/(2*d)
+        qynum2 = (c1.potinf(x,y-d)-c1.potinf(x,y+d))/(2*d)
+        print 'qx first term    ',qx2[c1.Nparam/2,0,0]
+        print 'qxnum first term ',qxnum2[c1.Nparam/2,0,0]
+        print 'qy first term    ',qy2[c1.Nparam/2,0,0]
+        print 'qynum first term ',qynum2[c1.Nparam/2,0,0]
+        np.testing.assert_allclose(qx1,qxnum1,rtol=1e-5,atol=1e-12)
+        np.testing.assert_allclose(qy1,qynum1,rtol=1e-5,atol=1e-12)
+        np.testing.assert_allclose(qx2,qxnum2,rtol=1e-5,atol=1e-12)
+        np.testing.assert_allclose(qy2,qynum2,rtol=1e-5,atol=1e-12)
     #def test_circ_inhom_with_well(self):
     #    ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
     #    w = DischargeWell(ml,xw=5,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
@@ -186,52 +186,52 @@ class TTimTest(unittest.TestCase):
     #    qn2 = qx2*np.cos(a) + qy2*np.sin(a)
     #    np.testing.assert_allclose(h1,h2,rtol=1e-4,atol=1e-8)
     #    np.testing.assert_allclose(qn1,qn2,rtol=1e-4,atol=1e-8)
-    def test_ellip_inhom_qxqy(self):
-        ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=1)
-        w = DischargeWell(ml,xw=0,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
-        e1a = EllipseInhomDataMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
-        e1 = EllipseInhom(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5)
-        ml.initialize()
-        x,y = 0.3,0.2
-        d = 1e-3
-        qx1,qy1 = e1.disinf(x,y) 
-        qxnum1 = (e1.potinf(x-d,y)-e1.potinf(x+d,y))/(2*d)
-        qynum1 = (e1.potinf(x,y-d)-e1.potinf(x,y+d))/(2*d)
-        print 'qx first term    ',qx1[0,0,0]
-        print 'qxnum first term ',qxnum1[0,0,0]
-        print 'qy first term    ',qy1[0,0,0]
-        print 'qynum first term ',qynum1[0,0,0]
-        x,y = 3.0,0.2
-        d = 1e-3
-        qx2,qy2 = e1.disinf(x,y) 
-        qxnum2 = (e1.potinf(x-d,y)-e1.potinf(x+d,y))/(2*d)
-        qynum2 = (e1.potinf(x,y-d)-e1.potinf(x,y+d))/(2*d)
-        print 'qx first term    ',qx2[e1.Nparam/2,0,0]
-        print 'qxnum first term ',qxnum2[e1.Nparam/2,0,0]
-        print 'qy first term    ',qy2[e1.Nparam/2,0,0]
-        print 'qynum first term ',qynum2[e1.Nparam/2,0,0]
-        np.testing.assert_allclose(qx1,qxnum1,rtol=1e-5,atol=1e-8)
-        np.testing.assert_allclose(qy1,qynum1,rtol=1e-5,atol=1e-8)
-        np.testing.assert_allclose(qx2,qxnum2,rtol=1e-5,atol=1e-8)
-        np.testing.assert_allclose(qy2,qynum2,rtol=1e-5,atol=1e-8)
-    def test_ellip_inhom_with_well(self):
-        ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
-        w = DischargeWell(ml,xw=.5,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
-        e1a = EllipseInhomDataMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
-        e1 = EllipseInhom(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5)
-        ml.solve()       
-        h1,h2 = np.zeros((2,e1.Ncp)), np.zeros((2,e1.Ncp))
-        qn1,qn2 = np.zeros((2,e1.Ncp)), np.zeros((2,e1.Ncp))
-        for i in range(e1.Ncp):
-            h1[:,i] = ml.head(e1.xc[i],e1.yc[i],2,aq=e1.aqin)[:,0]
-            h2[:,i] = ml.head(e1.xc[i],e1.yc[i],2,aq=e1.aqout)[:,0]
-            qx1,qy1 = ml.discharge(e1.xc[i],e1.yc[i],2,aq=e1.aqin)
-            qx2,qy2 = ml.discharge(e1.xc[i],e1.yc[i],2,aq=e1.aqout)
-            a = e1a.outwardnormalangle(e1.xc[i],e1.yc[i])
-            qn1[:,i] = qx1[:,0]*np.cos(a) + qy1[:,0]*np.sin(a)
-            qn2[:,i] = qx2[:,0]*np.cos(a) + qy2[:,0]*np.sin(a)
-        np.testing.assert_allclose(h1,h2,rtol=1e-4,atol=1e-8)
-        np.testing.assert_allclose(qn1,qn2,rtol=1e-3,atol=1e-8)
+    #def test_ellip_inhom_qxqy(self):
+    #    ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=1)
+    #    w = DischargeWell(ml,xw=0,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
+    #    e1a = EllipseInhomDataMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+    #    e1 = EllipseInhom(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5)
+    #    ml.initialize()
+    #    x,y = 0.3,0.2
+    #    d = 1e-3
+    #    qx1,qy1 = e1.disinf(x,y) 
+    #    qxnum1 = (e1.potinf(x-d,y)-e1.potinf(x+d,y))/(2*d)
+    #    qynum1 = (e1.potinf(x,y-d)-e1.potinf(x,y+d))/(2*d)
+    #    print 'qx first term    ',qx1[0,0,0]
+    #    print 'qxnum first term ',qxnum1[0,0,0]
+    #    print 'qy first term    ',qy1[0,0,0]
+    #    print 'qynum first term ',qynum1[0,0,0]
+    #    x,y = 3.0,0.2
+    #    d = 1e-3
+    #    qx2,qy2 = e1.disinf(x,y) 
+    #    qxnum2 = (e1.potinf(x-d,y)-e1.potinf(x+d,y))/(2*d)
+    #    qynum2 = (e1.potinf(x,y-d)-e1.potinf(x,y+d))/(2*d)
+    #    print 'qx first term    ',qx2[e1.Nparam/2,0,0]
+    #    print 'qxnum first term ',qxnum2[e1.Nparam/2,0,0]
+    #    print 'qy first term    ',qy2[e1.Nparam/2,0,0]
+    #    print 'qynum first term ',qynum2[e1.Nparam/2,0,0]
+    #    np.testing.assert_allclose(qx1,qxnum1,rtol=1e-5,atol=1e-8)
+    #    np.testing.assert_allclose(qy1,qynum1,rtol=1e-5,atol=1e-8)
+    #    np.testing.assert_allclose(qx2,qxnum2,rtol=1e-5,atol=1e-8)
+    #    np.testing.assert_allclose(qy2,qynum2,rtol=1e-5,atol=1e-8)
+    #def test_ellip_inhom_with_well(self):
+    #    ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
+    #    w = DischargeWell(ml,xw=.5,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
+    #    e1a = EllipseInhomDataMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+    #    e1 = EllipseInhom(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5)
+    #    ml.solve()       
+    #    h1,h2 = np.zeros((2,e1.Ncp)), np.zeros((2,e1.Ncp))
+    #    qn1,qn2 = np.zeros((2,e1.Ncp)), np.zeros((2,e1.Ncp))
+    #    for i in range(e1.Ncp):
+    #        h1[:,i] = ml.head(e1.xc[i],e1.yc[i],2,aq=e1.aqin)[:,0]
+    #        h2[:,i] = ml.head(e1.xc[i],e1.yc[i],2,aq=e1.aqout)[:,0]
+    #        qx1,qy1 = ml.discharge(e1.xc[i],e1.yc[i],2,aq=e1.aqin)
+    #        qx2,qy2 = ml.discharge(e1.xc[i],e1.yc[i],2,aq=e1.aqout)
+    #        a = e1a.outwardnormalangle(e1.xc[i],e1.yc[i])
+    #        qn1[:,i] = qx1[:,0]*np.cos(a) + qy1[:,0]*np.sin(a)
+    #        qn2[:,i] = qx2[:,0]*np.cos(a) + qy2[:,0]*np.sin(a)
+    #    np.testing.assert_allclose(h1,h2,rtol=1e-4,atol=1e-8)
+    #    np.testing.assert_allclose(qn1,qn2,rtol=1e-3,atol=1e-8)
 
 
 
