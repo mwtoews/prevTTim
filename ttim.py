@@ -1109,15 +1109,6 @@ class CircInhomRadial(Element,InhomEquation):
         return qx,qy
     def layout(self):
         return 'line', self.x0 + self.R * np.cos(np.linspace(0,2*np.pi,100)), self.y0 + self.R * np.sin(np.linspace(0,2*np.pi,100))
-
-
-def CircInhomMaq(model,x0=0,y0=0,R=1,order=1,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False,label=None,test=False):
-    CircInhomDataMaq(model,x0,y0,R,kaq,z,c,Saq,Sll,topboundary,phreatictop)
-    return CircInhom(model,x0,y0,R,order,label,test)
-    
-def CircInhom3D(self,model,x0=0,y0=0,R=1,order=1,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True,label=None):
-    CircInhomData3D(model,x0,y0,R,kaq,z,Saq,kzoverkh,phreatictop)       
-    return CircInhom(model,x0,y0,R,order,label)
                 
 class CircInhom(Element,InhomEquation):
     def __init__(self,model,x0=0,y0=0,R=1.0,order=0,label=None,test=False):
@@ -1133,10 +1124,11 @@ class CircInhom(Element,InhomEquation):
         self.Ncp = 2*self.order + 1
         self.thetacp = np.arange(0,2*np.pi,(2*np.pi)/self.Ncp)
         self.xc = self.x0 + self.R * np.cos( self.thetacp )
-        self.yc = self.x0 + self.R * np.sin( self.thetacp )
+        self.yc = self.y0 + self.R * np.sin( self.thetacp )
         self.aqin = self.model.aq.findAquiferData(self.x0,self.y0)
         self.aqout = self.model.aq.findAquiferData(self.x0+(1.0+1e-8)*self.R,self.y0)
-        # Now that aqin is know, check that radii of circles are the same
+        assert self.aqin.Naq == self.aqout.Naq, 'TTim input error: Number of layers needs to be the same inside and outside circular inhomogeneity'
+        # Now that aqin is known, check that radii of circles are the same
         assert self.aqin.R == self.R, 'TTim Input Error: Radius of CircInhom and CircInhomData must be equal'
         self.setbc()
         self.facin = np.zeros((self.order+1,self.aqin.Naq,self.model.Nin,self.model.Npin),dtype='D')
@@ -1279,6 +1271,14 @@ class CircInhom(Element,InhomEquation):
         return qx,qy
     def layout(self):
         return 'line', self.x0 + self.R * np.cos(np.linspace(0,2*np.pi,100)), self.y0 + self.R * np.sin(np.linspace(0,2*np.pi,100))
+
+def CircInhomMaq(model,x0=0,y0=0,R=1,order=1,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False,label=None,test=False):
+    CircInhomDataMaq(model,x0,y0,R,kaq,z,c,Saq,Sll,topboundary,phreatictop)
+    return CircInhom(model,x0,y0,R,order,label,test)
+    
+def CircInhom3D(self,model,x0=0,y0=0,R=1,order=1,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True,label=None):
+    CircInhomData3D(model,x0,y0,R,kaq,z,Saq,kzoverkh,phreatictop)       
+    return CircInhom(model,x0,y0,R,order,label)
 
 def EllipseInhomMaq(model,x0=0,y0=0,along=2.0,bshort=1.0,angle=0.0,order=1,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreatictop=False,label=None):
     EllipseInhomDataMaq(model,x0,y0,along,bshort,angle,kaq,z,c,Saq,Sll,topboundary,phreatictop)
@@ -1539,6 +1539,75 @@ class LineSinkBase(Element):
         return self.model.head(self.xc,self.yc,t)[self.pylayers] - self.resfach[:,np.newaxis] * self.strength(t)
     def layout(self):
         return 'line', [self.x1,self.x2], [self.y1,self.y2]
+        
+
+class CircAreaSink(Element):
+    '''Circular Area Sink'''
+    def __init__(self,model,xc=0,yc=0,R=0.1,tsandbc=[(0.0,1.0)],name='CircAreaSink',label=None):
+        Element.__init__(self, model, Nparam=1, Nunknowns=0, layers=1, tsandbc=tsandbc, type='g', name=name, label=label)
+        self.xc = float(xc); self.yc = float(yc); self.R = float(R)
+        self.model.addElement(self)
+    def __repr__(self):
+        return self.name + ' at ' + str((self.xc,self.yc))
+    def initialize(self):
+        self.aq = self.model.aq.findAquiferData(self.xc,self.yc)
+        self.setbc()
+        self.setflowcoef()
+        self.an = self.aq.coef[0,:] * self.flowcoef  # Since recharge is in layer 1 (pylayer=0), and RHS is -N
+        self.an.shape = (self.aq.Naq,self.model.Nin,self.model.Npin)
+        self.termin  = self.aq.lab2 * self.R * self.an * kv(1,self.R/self.aq.lab2)
+        self.termin2 = self.aq.lab2**2 * self.an
+        self.terminq = self.R * self.an * kv(1,self.R/self.aq.lab2)
+        self.termout = self.aq.lab2 * self.R * self.an * iv(1,self.R/self.aq.lab2)
+        self.termoutq= self.R * self.an * iv(1,self.R/self.aq.lab2)
+
+        self.strengthinf = self.an
+        self.strengthinflayers = np.sum(self.strengthinf * self.aq.eigvec[self.pylayers,:,:], 1) 
+
+    def setflowcoef(self):
+        '''Separate function so that this can be overloaded for other types'''
+        self.flowcoef = 1.0 / self.model.p  # Step function
+    def potinf(self,x,y,aq=None):
+        '''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        rv = np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D')
+        if aq == self.aq:
+            r = np.sqrt( (x-self.xc)**2 + (y-self.yc)**2 )
+            pot = np.zeros(self.model.Npin,'D')
+            if r < self.R:
+                for i in range(self.aq.Naq):
+                    for j in range(self.model.Nin):
+                        #if r / abs(self.aq.lab2[i,j,0]) < self.Rzero:
+                        rv[0,i,j,:] = -self.termin[i,j,:] * iv(0,r/self.aq.lab2[i,j,:]) + self.termin2[i,j,:]
+            else:
+                for i in range(self.aq.Naq):
+                    for j in range(self.model.Nin):
+                        if (r-self.R) / abs(self.aq.lab2[i,j,0]) < self.Rzero:
+                            rv[0,i,j,:] = self.termout[i,j,:] * kv(0,r/self.aq.lab2[i,j,:])
+        rv.shape = (self.Nparam,aq.Naq,self.model.Np)
+        return rv
+    def disinf(self,x,y,aq=None):
+        '''Can be called with only one x,y value'''
+        if aq is None: aq = self.model.aq.findAquiferData( x, y )
+        qx,qy = np.zeros((self.Nparam,aq.Naq,self.model.Np),'D'), np.zeros((self.Nparam,aq.Naq,self.model.Np),'D')
+        if aq == self.aq:
+            qr = np.zeros((self.Nparam,aq.Naq,self.model.Nin,self.model.Npin),'D')
+            r = np.sqrt( (x-self.xc)**2 + (y-self.yc)**2 )
+            if r < self.R:
+                for i in range(self.aq.Naq):
+                    for j in range(self.model.Nin):
+                        #if r / abs(self.aq.lab2[i,j,0]) < self.Rzero:
+                        qr[0,i,j,:] = self.terminq[i,j,:] * iv(1,r/self.aq.lab2[i,j,:])
+            else:
+                for i in range(self.aq.Naq):
+                    for j in range(self.model.Nin):
+                        if (r-self.R) / abs(self.aq.lab2[i,j,0]) < self.Rzero:
+                            qr[0,i,j,:] = self.termoutq[i,j,:] * kv(1,r/self.aq.lab2[i,j,:])                
+            qr.shape = (self.Nparam,aq.Naq,self.model.Np)
+            qx[:] = qr * (x-self.xc) / r; qy[:] = qr * (y-self.yc) / r
+        return qx,qy
+    def layout(self):
+        return 'line', self.xc + self.R*np.cos(np.linspace(0,2*np.pi,100)), self.xc + self.R*np.sin(np.linspace(0,2*np.pi,100))
         
 class LineSinkHoBase(Element):
     '''Higher Order LineSink Base Class. All Higher Order Line Sink elements are derived from this class'''
@@ -2196,6 +2265,61 @@ def timlayout( ml, ax = None, color = 'k', lw = 0.5, style = '-' ):
 
 ##########################################
 
+#S1 = 0.1
+#S2 = 1e-3
+#c = 100.0
+#ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[c],Saq=[S1,S2],Sll=[1e-12],phreatictop=True,tmin=1,tmax=10,M=20)
+##ml = ModelMaq(kaq=[4],z=[4,0],Saq=[S1],phreatictop=True,tmin=1,tmax=10,M=20)
+#
+#
+#ca = CircAreaSink(ml,0,0,100,[0,1e-3])
+#
+#ml.initialize()
+#ca.initialize()
+#
+#ml.solve()
+#
+##x = 12.0
+##y = 3.0
+##d = 1e-4
+##p0 = ca.potinf(x,y)
+##p1 = ca.potinf(x+d,y)
+##p2 = ca.potinf(x,y+d)
+##p3 = ca.potinf(x-d,y)
+##p4 = ca.potinf(x,y-d)
+##numlap = (p1+p2+p3+p4-4.0*p0)/d**2 - p0 / ml.aq.lab**2
+##print 'numlap'
+##print numlap
+##print 'exact'
+##print -ca.an
+##qxnum = (p3-p1)/(2*d)
+##qynum = (p4-p2)/(2*d)
+##qx,qy = ca.disinf(x,y)
+##print 'qxnum'
+##print qxnum
+##print 'qx'
+##print qx
+##print 'qynum'
+##print qynum
+##print 'qy'
+##print qy
+#x = 90.0
+#y = 3.0
+#d = 1e-1
+#t = 2.0
+#dt = 1e-2
+#h0 = ml.head(x,y,t)[:,0]
+#h1 = ml.head(x+d,y,t)[:,0]
+#h2 = ml.head(x,y+d,t)[:,0]
+#h3 = ml.head(x-d,y,t)[:,0]
+#h4 = ml.head(x,y-d,t)[:,0]
+#hmin = ml.head(x,y,t-dt)[:,0]
+#hplus = ml.head(x,y,t+dt)[:,0]
+#numlap = (h1+h2+h3+h4-4.0*h0)/(d**2)
+#dhdt = (hplus-hmin)/(2*dt)
+##qv = (h0[0]-h0[1]) / c
+
+
 #ml1 = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
 #ml1 = ModelMaq(kaq=[4],z=[1,0],Saq=[1e-3],tmin=1,tmax=10,M=20)
 #ls1 = LineSinkBase(ml1,type='g')
@@ -2218,18 +2342,21 @@ def timlayout( ml, ax = None, color = 'k', lw = 0.5, style = '-' ):
 #ml2.solve()
 
 #
-ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
+
+#ml = ModelMaq(kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6],tmin=1,tmax=10,M=20)
 #w = DischargeWell(ml,xw=.5,yw=0,rw=.1,tsandQ=[0,5.0],layers=1)
-ls = MscreenLineSinkDitchString(ml,[(-1,0),(0,0),(1,0)],tsandQ=[(0.0,1.0)],layers=[2])
-#e1a = EllipseInhomDataMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
-#e1 = EllipseInhom(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5)
-#e1 = EllipseInhomMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
-c1 = CircInhomMaq(ml,0,0,2.0,order=5,kaq=[10,.1],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5],test=True)
-#c2 = CircInhomMaq(ml,0,0,5000.0,order=1,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
-#ml.initialize()
-#c2.circ_in_small[:] = 0
-#c2.circ_out_small[:] = 0
-ml.solve()
+##ls = MscreenLineSinkDitchString(ml,[(-1,0),(0,0),(1,0)],tsandQ=[(0.0,1.0)],layers=[2])
+##e1a = EllipseInhomDataMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+##e1 = EllipseInhom(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5)
+##e1 = EllipseInhomMaq(ml,0,0,along=2.0,bshort=1.0,angle=0.0,order=5,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+## Same inside and outside
+#c1 = CircInhomMaq(ml,0,0,2.0,order=5,kaq=[4,5],z=[4,2,1,0],c=[100],Saq=[1e-3,1e-4],Sll=[1e-6])
+##c1 = CircInhomMaq(ml,0,0,2.0,order=5,kaq=[10,.1],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+##c2 = CircInhomMaq(ml,0,0,5000.0,order=1,kaq=[10,2],z=[4,2,1,0],c=[200],Saq=[2e-3,2e-4],Sll=[1e-5])
+##ml.initialize()
+##c2.circ_in_small[:] = 0
+##c2.circ_out_small[:] = 0
+#ml.solve()
 
 #ml.solve()       
 #h1,h2 = np.zeros((2,e1.Ncp)), np.zeros((2,e1.Ncp))
