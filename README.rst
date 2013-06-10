@@ -3,12 +3,12 @@ TTim
 ====
 
 :Author: Mark Bakker
-:Website: https://code.google.com/p/ttim/
+:Website: http://code.google.com/p/ttim/
 
 TTim is a multi-layer transient analytic element solver for modeling
 groundwater flow.
 
-Dependancies
+Dependencies
 ------------
 
 TTim depends on:
@@ -21,7 +21,7 @@ TTim depends on:
 Build extensions
 ----------------
 
-A Fortran 90/95 compiler is requird by f2py to build the Python extensions.
+A Fortran 90/95 compiler is required by f2py to build the Python extensions.
 
 Run the command::
 
@@ -29,19 +29,30 @@ Run the command::
 
 Or on Windows, specify a compiler, e.g. MinGW::
 
-    $ python.exe setup.py build_ext --fcompiler=gnu95 --compiler=mingw32
+    > python.exe setup.py build_ext --fcompiler=gnu95 --compiler=mingw32
 
 Test
 ----
 
 Build the extensions in-place, then test::
 
-    $ python setup build_ext --inplace
-    $ python setup test
+    $ python setup.py build_ext --inplace
+    $ python setup.py test
 
 Install
 -------
 
 Run the command (as root or with ``sudo``)::
 
-    $ python setup install
+    $ python setup.py install
+
+Distribution
+------------
+
+To make a source distribution::
+
+    $ python setup.py sdist
+
+To make a MS Windows installer::
+
+    > python setup.py bdist_wininst

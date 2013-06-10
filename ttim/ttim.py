@@ -1,5 +1,5 @@
 '''
-Copyright (C), 2010-2012, Mark Bakker.
+Copyright (C), 2010-2013, Mark Bakker.
 TTim is distributed under the MIT license
 '''
 
