@@ -6,14 +6,14 @@ TTim
 :Website: http://code.google.com/p/ttim/
 
 TTim is a multi-layer transient analytic element solver for modeling
-groundwater flow.
+groundwater flow [1]_.
 
 Dependencies
 ------------
 
 TTim depends on:
 
- - Python 2.x
+ - Python >=2.6, <3
  - numpy
  - scipy
  - matplotlib
@@ -27,7 +27,7 @@ Run the command::
 
     $ python setup.py build_ext
 
-Or on Windows, specify a compiler, e.g. MinGW::
+Or on Microsoft Windows, specify a compiler, e.g. MinGW::
 
     > python.exe setup.py build_ext --fcompiler=gnu95 --compiler=mingw32
 
@@ -53,6 +53,14 @@ To make a source distribution::
 
     $ python setup.py sdist
 
-To make a MS Windows installer::
+To make a Microsoft Windows installer::
 
     > python setup.py bdist_wininst
+
+Reference
+---------
+
+.. [1] M. Bakker, 2013, Semi-analytic modeling of transient multi-layer
+       flow with TTim, Hydrogeology Journal, 21(4), 935-943.
+       doi:10.1007/s10040-013-0975-2
+

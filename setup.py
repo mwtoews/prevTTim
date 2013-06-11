@@ -7,7 +7,7 @@ from numpy.distutils.core import Extension, Command, setup
 
 
 class test(Command):
-    """run unit tests after in-place build"""
+    """Run unit tests after in-place build"""
     description = __doc__
     user_options = []
 
@@ -27,18 +27,28 @@ class test(Command):
         t = TextTestRunner(verbosity=2)
         t.run(tests)
 
+
 ext_args = {}
 if os.sys.platform.startswith('win'):
     ext_args['extra_link_args'] = ['-static']
 
 description = '''\
-A multi-layer transient analytic element solver for modeling groundwater flow
+A multi-layer transient analytic element solver for modeling
+groundwater flow
 '''
 
 long_description = '''\
-TTim (pronounce "Tee Tim") is a solver for transient multi-aquifer flow based
-on the Laplace-transform analytic element method and is developed at the Delft
-University of Technology in Delft, The Netherlands.
+TTim (pronounce "Tee Tim") is a solver for transient multi-aquifer flow
+based on the Laplace-transform analytic element method and is developed
+at the Delft University of Technology in Delft, The Netherlands.
+
+
+Reference
+---------
+
+.. [1] M. Bakker, 2013, Semi-analytic modeling of transient multi-layer
+       flow with TTim, Hydrogeology Journal, 21(4), 935-943.
+       doi:10.1007/s10040-013-0975-2
 '''
 
 classifier_txt = '''\
@@ -67,6 +77,7 @@ setup(
     classifiers = [x for x in classifier_txt.split("\n") if x],
     license = 'MIT License',
     requires = ['numpy', 'scipy'],
+    py_modules = ['TTim'],  # support example in Hydrogeology J.
     packages = [
         'ttim',
         'ttim.tests',
