@@ -298,7 +298,7 @@ class TimModel:
     def writemodel(self,fname):
         self.initialize()  # So that the model can be written without solving first
         f = open(fname,'w')
-        f.write('from ttim2 import *\n')
+        f.write('from ttim import *\n')
         f.write( self.write() )
         for e in self.elementList:
             f.write( e.write() )
@@ -347,7 +347,7 @@ class ModelMaq(TimModel):
         TimModel.__init__(self,kaq,Haq,c,Saq,Sll,topboundary,tmin,tmax,M)
         self.name = 'ModelMaq'
         
-def param_3d(kaq,z,Saq,kzoverkh,phreatictop):
+def param_3d(kaq=[1],z=[1,0],Saq=[0.001],kzoverkh=1.0,phreatictop=False):
     # Computes the parameters for a TimModel from input for a 3D model
     kaq = np.atleast_1d(kaq).astype('d')
     z = np.atleast_1d(z).astype('d')
@@ -483,7 +483,7 @@ class CircInhomDataMaq(CircInhomData):
         CircInhomData.__init__(self,model,x0,y0,R,kaq,Haq,c,Saq,Sll,topboundary)
 
     
-class CircInhomData3D(AquiferData):
+class CircInhomData3D(CircInhomData):
     def __init__(self,model,x0=0,y0=0,R=1,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True):
         kaq,Haq,c,Saq,Sll = param_3d(kaq,z,Saq,kzoverkh,phreatictop)
         CircInhomData.__init__(self,model,x0,y0,R,kaq,Haq,c,Saq,Sll,'imp')
@@ -1125,7 +1125,7 @@ class CircInhom(Element,InhomEquation):
         self.thetacp = np.arange(0,2*np.pi,(2*np.pi)/self.Ncp)
         self.xc = self.x0 + self.R * np.cos( self.thetacp )
         self.yc = self.y0 + self.R * np.sin( self.thetacp )
-        self.aqin = self.model.aq.findAquiferData(self.x0,self.y0)
+        self.aqin = self.model.aq.findAquiferData(self.x0 + (1-1e-10)*self.R,self.y0)
         self.aqout = self.model.aq.findAquiferData(self.x0+(1.0+1e-8)*self.R,self.y0)
         assert self.aqin.Naq == self.aqout.Naq, 'TTim input error: Number of layers needs to be the same inside and outside circular inhomogeneity'
         # Now that aqin is known, check that radii of circles are the same
@@ -1276,7 +1276,7 @@ def CircInhomMaq(model,x0=0,y0=0,R=1,order=1,kaq=[1],z=[1,0],c=[],Saq=[0.001],Sl
     CircInhomDataMaq(model,x0,y0,R,kaq,z,c,Saq,Sll,topboundary,phreatictop)
     return CircInhom(model,x0,y0,R,order,label,test)
     
-def CircInhom3D(self,model,x0=0,y0=0,R=1,order=1,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True,label=None):
+def CircInhom3D(model,x0=0,y0=0,R=1,order=1,kaq=[1,1,1],z=[4,3,2,1],Saq=[0.3,0.001,0.001],kzoverkh=[.1,.1,.1],phreatictop=True,label=None):
     CircInhomData3D(model,x0,y0,R,kaq,z,Saq,kzoverkh,phreatictop)       
     return CircInhom(model,x0,y0,R,order,label)
 
