@@ -13,7 +13,7 @@ import inspect # Used for storing the input
 import os
 from mathieu_functions import mathieu
 
-__version__ = 0.21
+__version__ = 0.23
 
 class TimModel:
     def __init__(self,kaq=[1,1],Haq=[1,1],c=[np.nan,100],Saq=[0.3,0.003],Sll=[0],topboundary='imp',tmin=1,tmax=10,M=20):
@@ -327,7 +327,7 @@ def param_maq(kaq=[1],z=[1,0],c=[],Saq=[0.001],Sll=[0],topboundary='imp',phreati
         if phreatictop: Saq[0] = Saq[0] / H[0]
         Sll = Sll * H[1::2]
         c = np.hstack((np.nan,c))
-        Sll = np.hstack((np.nan,Sll))
+        Sll = np.hstack((1e-30,Sll)) # Was: Sll = np.hstack((np.nan,Sll)), but that gives error when c approaches inf
     else: # leaky layers on top
         assert len(z) == 2*Naq+1, 'Error: Length of z needs to be ' + str(2*Naq+1)
         assert len(c) == Naq, 'Error: Length of c needs to be ' + str(Naq)
@@ -382,9 +382,10 @@ class AquiferData:
         self.T = self.kaq * self.Haq
         self.Tcol = self.T.reshape(self.Naq,1)
         self.c = np.atleast_1d(c).astype('d')
+        self.c[self.c > 1e100] = 1e100 
         self.Saq = np.atleast_1d(Saq).astype('d')
         self.Sll = np.atleast_1d(Sll).astype('d')
-        self.Sll[self.Sll<1e-20] = 1e-20 # Cannot be zero
+        self.Sll[self.Sll < 1e-20] = 1e-20 # Cannot be zero
         self.topboundary = topboundary[:3]
         self.D = self.T / self.Saq
     def __repr__(self):
