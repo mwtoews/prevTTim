@@ -16,7 +16,7 @@ from mathieu_functions import mathieu
 __version__ = 0.23
 
 class TimModel:
-    def __init__(self,kaq=[1,1],Haq=[1,1],c=[np.nan,100],Saq=[0.3,0.003],Sll=[0],topboundary='imp',tmin=1,tmax=10,M=20):
+    def __init__(self,kaq=[1,1],Haq=[1,1],c=[1e100,100],Saq=[0.3,0.003],Sll=[0],topboundary='imp',tmin=1,tmax=10,M=20):
         self.elementList = []
         self.elementDict = {}
         self.vbcList = []  # List with variable boundary condition 'v' elements
@@ -278,6 +278,7 @@ class TimModel:
                 for j in range(e.Nunknowns):
                     e.parameters[:,j,i] = sol[icount,:]
                     icount += 1
+                e.run_after_solve()
         print 'solution complete'
         if sendback:
             return sol
@@ -361,7 +362,7 @@ def param_3d(kaq=[1],z=[1,0],Saq=[0.001],kzoverkh=1.0,phreatictop=False):
     c = 0.5 * H[:-1] / ( kzoverkh[:-1] * kaq[:-1] ) + 0.5 * H[1:] / ( kzoverkh[1:] * kaq[1:] )
     Saq = Saq * H
     if phreatictop: Saq[0] = Saq[0] / H[0]
-    c = np.hstack((np.nan,c))
+    c = np.hstack((1e100,c))
     Sll = 1e-20 * np.ones(len(c))
     return kaq,H,c,Saq,Sll
 
@@ -648,12 +649,11 @@ class Element:
     def strength(self,t,derivative=0):
         '''returns array of strengths (Nlayers,len(t)) t must be ordered and tmin <= t <= tmax'''
         # Could potentially be more efficient if s is pre-computed for all elements, but I don't know if that is worthwhile to store as it is quick now
-        time = np.atleast_1d(t).copy()
-        rv = np.zeros((self.Nlayers,len(time)))
+        rv = np.zeros((self.Nlayers,np.size(t)))
         if self.type == 'g':
             s = self.strengthinflayers * self.model.p ** derivative
             for itime in range(self.Ntstart):
-                t = time - self.tstart[itime]
+                t -=  self.tstart[itime]
                 for i in range(self.Nlayers):
                     rv[i] += self.bc[itime] * self.model.inverseLapTran(s[i],t)
         else:
@@ -663,7 +663,7 @@ class Element:
             for k in range(self.model.Ngvbc):
                 e = self.model.gvbcList[k]
                 for itime in range(e.Ntstart):
-                    t = time - e.tstart[itime]
+                    t -= e.tstart[itime]
                     for i in range(self.Nlayers):
                         rv[i] += e.bc[itime] * self.model.inverseLapTran(s[k,i],t)
         return rv
@@ -685,6 +685,11 @@ class Element:
                 rv += key + ' = ' + str(self.inputvalues[key]) + ',\n'
         rv += ')\n'
         return rv
+    def run_after_solve(self):
+        '''function to run after a solution is completed.
+        for most elements nothing needs to be done,
+        but for strings of elements some arrays may need to be filled'''
+        pass
     
 class HeadEquation:
     def equation(self):
@@ -889,11 +894,14 @@ class MscreenEquation:
 class MscreenDitchEquation:
     def equation(self):
         '''Mix-in class that returns matrix rows for multi-scren conditions where total discharge is specified.
-        Works for Nunknowns = 1
         Returns matrix part Nunknowns,Neq,Np, complex
         Returns rhs part Nunknowns,Nvbc,Np, complex
         head_out - c*q_s = h_in
-        Set h_i - h_(i+1) = 0 and Sum Q_i = Q'''
+        Set h_i - h_(i+1) = 0 and Sum Q_i = Q
+        I would say
+        headin_i - headin_(i+1) = 0
+        headout_i - c*qs_i - headout_(i+1) + c*qs_(i+1) = 0 
+        '''
         mat = np.zeros( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' )  # Needs to be zero for last equation, but I think setting the whole array is quicker
         rhs = np.zeros( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )  # Needs to be initialized to zero
         ieq = 0
@@ -906,11 +914,14 @@ class MscreenDitchEquation:
                     if self.Nlayers > 1: mat[istart:istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:] - head[1:,:]
                     mat[istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[0,:] # Store head in top layer in last equation of this control point
                     if e == self:
+                        # Correct head in top layer in last equation to make it head inside
+                        mat[istart+self.Nlayers-1,ieq+istart,:] -= self.resfach[istart] * e.strengthinflayers[istart]
                         if icp == 0:
                             istartself = ieq  # Needed to build last equation
                         for i in range(self.Nlayers-1):
                             mat[istart+i,ieq+istart+i,:] -= self.resfach[istart+i] * e.strengthinflayers[istart+i]
                             mat[istart+i,ieq+istart+i+1,:] += self.resfach[istart+i+1] * e.strengthinflayers[istart+i+1]
+                            #vresfac not yet used here; it is set to zero ad I don't quite now what is means yet
                             mat[istart+i,ieq+istart:ieq+istart+i+1,:] -= self.vresfac[istart+i] * e.strengthinflayers[istart+i]
                     ieq += e.Nunknowns
             for i in range(self.model.Ngbc):
@@ -1845,14 +1856,18 @@ class MscreenWellOld(WellBase,MscreenEquation):
         
 class MscreenLineSink(LineSinkBase,MscreenEquation):
     '''MscreenLineSink that varies through time. Must be screened in multiple layers but heads are same in all screened layers'''
-    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandQ=[(0.0,1.0)],res=0.0,wh='H',layers=[1,2],label=None,addtomodel=True):
+    def __init__(self,model,x1=-1,y1=0,x2=1,y2=0,tsandQ=[(0.0,1.0)],res=0.0,wh='H',layers=[1,2],vres=0.0,wv=1.0,label=None,addtomodel=True):
         #assert len(layers) > 1, "TTim input error: number of layers for MscreenLineSink must be at least 2"
         self.storeinput(inspect.currentframe())
         LineSinkBase.__init__(self,model,x1=x1,y1=y1,x2=x2,y2=y2,tsandbc=tsandQ,res=res,wh=wh,layers=layers,type='v',name='MscreenLineSink',label=label,addtomodel=addtomodel)
         self.Nunknowns = self.Nparam
+        self.vres = np.atleast_1d(vres)  # Vertical resistance inside line-sink
+        self.wv = wv
+        if len(self.vres) == 1: self.vres = self.vres[0] * np.ones(self.Nlayers-1)
     def initialize(self):
         LineSinkBase.initialize(self)
         self.parameters = np.zeros( (self.model.Ngvbc, self.Nparam, self.model.Np), 'D' )
+        self.vresfac = self.vres / (self.wv * self.L)  # Qv = (hn - hn-1) / vresfac[n-1]
         
 class ZeroHeadWell(WellBase,HeadEquation):
     '''HeadWell that remains zero and constant through time'''
@@ -1985,8 +2000,23 @@ class LineSinkStringBase(Element):
             rvx[i*self.Nlayers:(i+1)*self.Nlayers,:] = qx
             rvy[i*self.Nlayers:(i+1)*self.Nlayers,:] = qy
         return rvx,rvy
+    def headinside(self,t):
+        rv = np.zeros((self.Nls,self.Nlayers,np.size(t)))
+        Q = self.strength_list(t)
+        for i in range(self.Nls):
+            rv[i,:,:] = self.model.head(self.xc[i],self.yc[i],t)[self.pylayers] - self.resfach[i*self.Nlayers:(i+1)*self.Nlayers,np.newaxis] * Q[i]
+        return rv
     def layout(self):
         return 'line', self.xlslayout, self.ylslayout
+    def run_after_solve(self):
+        for i in range(self.Nls):
+            self.lsList[i].parameters[:] = self.parameters[:,i*self.Nlayers:(i+1)*self.Nlayers,:]
+    def strength_list(self,t):
+        # conveniently using the strength functions of the individual line-sinks
+        rv = np.zeros((self.Nls,self.Nlayers,np.size(t)))
+        for i in range(self.Nls):
+            rv[i,:,:] = self.lsList[i].strength(t)
+        return rv
     
 #class LineSinkString(LineSinkStringBase):
 #    def __init__(self,model,xy=[(-1,0),(1,0)],tsandQ=[(0.0,1.0)],res=0.0,layers=1,label=None):
