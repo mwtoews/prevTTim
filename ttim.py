@@ -901,6 +901,8 @@ class MscreenDitchEquation:
         I would say
         headin_i - headin_(i+1) = 0
         headout_i - c*qs_i - headout_(i+1) + c*qs_(i+1) = 0 
+        In case of storage:
+        Sum Q_i - A * p^2 * headin = Q
         '''
         mat = np.zeros( (self.Nunknowns,self.model.Neq,self.model.Np), 'D' )  # Needs to be zero for last equation, but I think setting the whole array is quicker
         rhs = np.zeros( (self.Nunknowns,self.model.Ngvbc,self.model.Np), 'D' )  # Needs to be initialized to zero
@@ -912,7 +914,7 @@ class MscreenDitchEquation:
                 if e.Nunknowns > 0:
                     head = e.potinflayers(self.xc[icp],self.yc[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis,np.newaxis]  # T[self.pylayers,np.newaxis,np.newaxis] is not allowed
                     if self.Nlayers > 1: mat[istart:istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:] - head[1:,:]
-                    mat[istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[0,:] # Store head in top layer in last equation of this control point
+                    mat[istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[0,:] # Store head in top layer in 2nd to last equation of this control point
                     if e == self:
                         # Correct head in top layer in last equation to make it head inside
                         mat[istart+self.Nlayers-1,ieq+istart,:] -= self.resfach[istart] * e.strengthinflayers[istart]
@@ -937,10 +939,26 @@ class MscreenDitchEquation:
         # print 'istartself ',istartself
         mat[-1,:,:] = 0.0  
         mat[-1,istartself:istartself+self.Nparam,:] = 1.0
+        if self.Astorage is not None:
+            matlast = np.zeros( (self.model.Neq,  self.model.Np), 'D' )  # Used to store last equation in case of ditch storage
+            rhslast = np.zeros( (self.model.Np), 'D' )  # Used to store last equation in case of ditch storage 
+            ieq = 0
+            for e in self.model.elementList:
+                head = e.potinflayers(self.xc[0],self.yc[0],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis,np.newaxis]  # T[self.pylayers,np.newaxis,np.newaxis] is not allowed
+                matlast[ieq:ieq+e.Nunknowns] -= self.Astorage * self.model.p**2 * head[0,:]
+                if e == self:
+                    # only need to correct first unknown 
+                    matlast[ieq] += self.Astorage * self.model.p**2 * self.resfach[0] * e.strengthinflayers[0]
+                ieq += e.Nunknowns
+            for i in range(self.model.Ngbc):
+                head = self.model.gbcList[i].unitpotentiallayers(self.xc[0],self.yc[0],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis]
+                rhslast += self.Astorage * self.model.p**2 * head[0] 
+            mat[-1] += matlast
         rhs[-1,:,:] = 0.0
         if self.type == 'v':
             iself = self.model.vbcList.index(self)
             rhs[-1,self.model.Ngbc+iself,:] = 1.0  # If self.type == 'z', it should sum to zero, which is the default value of rhs
+            if self.Astorage is not None: rhs[-1,self.model.Ngbc+iself,:] += rhslast
         return mat, rhs
     
 class InhomEquation:
@@ -2000,22 +2018,22 @@ class LineSinkStringBase(Element):
             rvx[i*self.Nlayers:(i+1)*self.Nlayers,:] = qx
             rvy[i*self.Nlayers:(i+1)*self.Nlayers,:] = qy
         return rvx,rvy
-    def headinside(self,t):
+    def headinside(self,t,derivative=0):
         rv = np.zeros((self.Nls,self.Nlayers,np.size(t)))
-        Q = self.strength_list(t)
+        Q = self.strength_list(t,derivative=derivative)
         for i in range(self.Nls):
-            rv[i,:,:] = self.model.head(self.xc[i],self.yc[i],t)[self.pylayers] - self.resfach[i*self.Nlayers:(i+1)*self.Nlayers,np.newaxis] * Q[i]
+            rv[i,:,:] = self.model.head(self.xc[i],self.yc[i],t,derivative=derivative)[self.pylayers] - self.resfach[i*self.Nlayers:(i+1)*self.Nlayers,np.newaxis] * Q[i]
         return rv
     def layout(self):
         return 'line', self.xlslayout, self.ylslayout
     def run_after_solve(self):
         for i in range(self.Nls):
             self.lsList[i].parameters[:] = self.parameters[:,i*self.Nlayers:(i+1)*self.Nlayers,:]
-    def strength_list(self,t):
+    def strength_list(self,t,derivative=0):
         # conveniently using the strength functions of the individual line-sinks
         rv = np.zeros((self.Nls,self.Nlayers,np.size(t)))
         for i in range(self.Nls):
-            rv[i,:,:] = self.lsList[i].strength(t)
+            rv[i,:,:] = self.lsList[i].strength(t,derivative=derivative)
         return rv
     
 #class LineSinkString(LineSinkStringBase):
@@ -2051,13 +2069,14 @@ class MscreenLineSinkString(LineSinkStringBase,MscreenEquation):
         self.model.addElement(self)
         
 class MscreenLineSinkDitchString(LineSinkStringBase,MscreenDitchEquation):
-    def __init__(self,model,xy=[(-1,0),(1,0)],tsandQ=[(0.0,1.0)],res=0.0,wh='H',layers=[1,2],label=None):
+    def __init__(self,model,xy=[(-1,0),(1,0)],tsandQ=[(0.0,1.0)],res=0.0,wh='H',layers=[1,2],Astorage=None,label=None):
         LineSinkStringBase.__init__(self,model,tsandbc=tsandQ,layers=layers,type='v',name='MscreenLineSinkStringDitch',label=label)
         xy = np.atleast_2d(xy).astype('d')
         self.x,self.y = xy[:,0], xy[:,1]
         self.Nls = len(self.x) - 1
         for i in range(self.Nls):
             self.lsList.append( MscreenLineSink(model,x1=self.x[i],y1=self.y[i],x2=self.x[i+1],y2=self.y[i+1],tsandQ=tsandQ,res=res,wh=wh,layers=layers,label=None,addtomodel=False) )
+        self.Astorage = Astorage
         self.model.addElement(self)
     def initialize(self):
         LineSinkStringBase.initialize(self)
