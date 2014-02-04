@@ -649,13 +649,14 @@ class Element:
     def strength(self,t,derivative=0):
         '''returns array of strengths (Nlayers,len(t)) t must be ordered and tmin <= t <= tmax'''
         # Could potentially be more efficient if s is pre-computed for all elements, but I don't know if that is worthwhile to store as it is quick now
-        rv = np.zeros((self.Nlayers,np.size(t)))
+        time = np.atleast_1d(t).copy()
+        rv = np.zeros((self.Nlayers,np.size(time)))
         if self.type == 'g':
             s = self.strengthinflayers * self.model.p ** derivative
             for itime in range(self.Ntstart):
-                t -=  self.tstart[itime]
+                time -=  self.tstart[itime]
                 for i in range(self.Nlayers):
-                    rv[i] += self.bc[itime] * self.model.inverseLapTran(s[i],t)
+                    rv[i] += self.bc[itime] * self.model.inverseLapTran(s[i],time)
         else:
             s = np.sum( self.parameters[:,:,np.newaxis,:] * self.strengthinf, 1 )
             s = np.sum( s[:,np.newaxis,:,:] * self.aq.eigvec, 2 )
@@ -663,9 +664,9 @@ class Element:
             for k in range(self.model.Ngvbc):
                 e = self.model.gvbcList[k]
                 for itime in range(e.Ntstart):
-                    t -= e.tstart[itime]
+                    time -= e.tstart[itime]
                     for i in range(self.Nlayers):
-                        rv[i] += e.bc[itime] * self.model.inverseLapTran(s[k,i],t)
+                        rv[i] += e.bc[itime] * self.model.inverseLapTran(s[k,i],time)
         return rv
     def headinside(self,t):
         print "This function not implemented for this element"
