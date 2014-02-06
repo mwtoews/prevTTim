@@ -664,10 +664,60 @@ class Element:
             for k in range(self.model.Ngvbc):
                 e = self.model.gvbcList[k]
                 for itime in range(e.Ntstart):
-                    time -= e.tstart[itime]
-                    for i in range(self.Nlayers):
-                        rv[i] += e.bc[itime] * self.model.inverseLapTran(s[k,i],time)
+                    t = time - e.tstart[itime]
+                    #print 'e,time ',e,t
+                    if t[-1] >= self.model.tmin:  # Otherwise all zero
+                        for i in range(self.Nlayers):
+                            rv[i] += e.bc[itime] * self.model.inverseLapTran(s[k,i],t)
         return rv
+        
+    #def potential(self,x,y,t,pylayers=None,aq=None,derivative=0,returnphi=0):
+    #    '''Returns pot[Naq,Ntimes] if layers=None, otherwise pot[len(pylayers,Ntimes)]
+    #    t must be ordered '''
+    #    if aq is None: aq = self.aq.findAquiferData(x,y)
+    #    if pylayers is None: pylayers = range(aq.Naq)
+    #    Nlayers = len(pylayers)
+    #    time = np.atleast_1d(t).copy()
+    #    pot = np.zeros((self.Ngvbc, aq.Naq, self.Np),'D')
+    #    for i in range(self.Ngbc):
+    #        pot[i,:] += self.gbcList[i].unitpotential(x,y,aq)
+    #    for e in self.vzbcList:
+    #        pot += e.potential(x,y,aq)
+    #    if pylayers is None:
+    #        pot = np.sum( pot[:,np.newaxis,:,:] * aq.eigvec, 2 )
+    #    else:
+    #        pot = np.sum( pot[:,np.newaxis,:,:] * aq.eigvec[pylayers,:], 2 )
+    #    if derivative > 0: pot *= self.p**derivative
+    #    if returnphi: return pot
+    #    rv = np.zeros((Nlayers,len(time)))
+    #    if (time[0] < self.tmin) or (time[-1] > self.tmax): print 'Warning, some of the times are smaller than tmin or larger than tmax; zeros are substituted'
+    #    #
+    #    for k in range(self.Ngvbc):
+    #        e = self.gvbcList[k]
+    #        for itime in range(e.Ntstart):
+    #            t = time - e.tstart[itime]
+    #            it = 0
+    #            if t[-1] >= self.tmin:  # Otherwise all zero
+    #                if (t[0] < self.tmin): it = np.argmax( t >= self.tmin )  # clever call that should be replaced with find_first function when included in numpy
+    #                for n in range(self.Nin):
+    #                    tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
+    #                    ## I think these lines are not needed anymore as I modified tintervals[0] and tintervals[-1] by eps
+    #                    #if n == self.Nin-1:
+    #                    #    tp = t[ (t >= self.tintervals[n]) & (t <= self.tintervals[n+1]) ]
+    #                    #else:
+    #                    #    tp = t[ (t >= self.tintervals[n]) & (t < self.tintervals[n+1]) ]
+    #                    Nt = len(tp)
+    #                    if Nt > 0:  # if all values zero, don't do the inverse transform
+    #                        for i in range(Nlayers):
+    #                            # I used to check the first value only, but it seems that checking that nothing is zero is needed and should be sufficient
+    #                            #if np.abs( pot[k,i,n*self.Npin] ) > 1e-20:  # First value very small
+    #                            if not np.any( pot[k,i,n*self.Npin:(n+1)*self.Npin] == 0.0) : # If there is a zero item, zero should be returned; funky enough this can be done with a straight equal comparison
+    #                                rv[i,it:it+Nt] += e.bc[itime] * invlaptrans.invlap( tp, self.tintervals[n], self.tintervals[n+1], pot[k,i,n*self.Npin:(n+1)*self.Npin], self.gamma[n], self.M, Nt )
+    #                        it = it + Nt
+    #    return rv        
+        
+        
+        
     def headinside(self,t):
         print "This function not implemented for this element"
         return
@@ -917,7 +967,7 @@ class MscreenDitchEquation:
                     if self.Nlayers > 1: mat[istart:istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[:-1,:] - head[1:,:]
                     mat[istart+self.Nlayers-1,ieq:ieq+e.Nunknowns,:] = head[0,:] # Store head in top layer in 2nd to last equation of this control point
                     if e == self:
-                        # Correct head in top layer in last equation to make it head inside
+                        # Correct head in top layer in second to last equation to make it head inside
                         mat[istart+self.Nlayers-1,ieq+istart,:] -= self.resfach[istart] * e.strengthinflayers[istart]
                         if icp == 0:
                             istartself = ieq  # Needed to build last equation
@@ -925,12 +975,12 @@ class MscreenDitchEquation:
                             mat[istart+i,ieq+istart+i,:] -= self.resfach[istart+i] * e.strengthinflayers[istart+i]
                             mat[istart+i,ieq+istart+i+1,:] += self.resfach[istart+i+1] * e.strengthinflayers[istart+i+1]
                             #vresfac not yet used here; it is set to zero ad I don't quite now what is means yet
-                            mat[istart+i,ieq+istart:ieq+istart+i+1,:] -= self.vresfac[istart+i] * e.strengthinflayers[istart+i]
+                            #mat[istart+i,ieq+istart:ieq+istart+i+1,:] -= self.vresfac[istart+i] * e.strengthinflayers[istart+i]
                     ieq += e.Nunknowns
             for i in range(self.model.Ngbc):
                 head = self.model.gbcList[i].unitpotentiallayers(self.xc[icp],self.yc[icp],self.pylayers) / self.aq.T[self.pylayers][:,np.newaxis]
                 if self.Nlayers > 1: rhs[istart:istart+self.Nlayers-1,i,:] -= head[:-1,:] - head[1:,:]
-                rhs[istart+self.Nlayers-1,i,:] -= head[0,:] # Store minus the head in top layer in last equation for this control point
+                rhs[istart+self.Nlayers-1,i,:] -= head[0,:] # Store minus the head in top layer in second to last equation for this control point
         # Modify last equations
         for icp in range(self.Ncp-1):
             ieq = (icp+1) * self.Nlayers - 1
@@ -2071,7 +2121,8 @@ class MscreenLineSinkString(LineSinkStringBase,MscreenEquation):
         
 class MscreenLineSinkDitchString(LineSinkStringBase,MscreenDitchEquation):
     def __init__(self,model,xy=[(-1,0),(1,0)],tsandQ=[(0.0,1.0)],res=0.0,wh='H',layers=[1,2],Astorage=None,label=None):
-        LineSinkStringBase.__init__(self,model,tsandbc=tsandQ,layers=layers,type='v',name='MscreenLineSinkStringDitch',label=label)
+        self.storeinput(inspect.currentframe())
+        LineSinkStringBase.__init__(self,model,tsandbc=tsandQ,layers=layers,type='v',name='MscreenLineSinkDitchString',label=label)
         xy = np.atleast_2d(xy).astype('d')
         self.x,self.y = xy[:,0], xy[:,1]
         self.Nls = len(self.x) - 1
