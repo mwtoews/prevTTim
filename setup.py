@@ -18,14 +18,18 @@ class test(Command):
         pass
 
     def run(self):
-        try:
-            import ttim
-        except ImportError:
-            self.run_command('build_ext')
+        # Force an in-place build for testing speedups
+        cmd = self.reinitialize_command('build_ext')
+        setattr(cmd, 'inplace', 1)
+        self.run_command('build_ext')
+
         from ttim.tests import ttim_testsuite
         tests = TestLoader().loadTestsFromModule(ttim_testsuite)
-        t = TextTestRunner(verbosity=2)
-        t.run(tests)
+        runner = TextTestRunner(verbosity=2)
+        result = runner.run(tests)
+
+        if not result.wasSuccessful():
+            sys.exit(1)
 
 
 ext_args = {}

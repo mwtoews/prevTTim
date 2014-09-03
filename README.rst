@@ -34,9 +34,8 @@ Or on Microsoft Windows, specify a compiler, e.g. MinGW::
 Test
 ----
 
-Build the extensions in-place, then test::
+Run tests to ensure the module was built correctly::
 
-    $ python setup.py build_ext --inplace
     $ python setup.py test
 
 Install
